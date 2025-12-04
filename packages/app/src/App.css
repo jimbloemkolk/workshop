@@ -1,0 +1,276 @@
+.app {
+  min-height: 100vh;
+  padding: 16px;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 24px;
+  color: #1f2937;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pipeline-counter {
+  background: #f3f4f6;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  color: #4b5563;
+  font-size: 14px;
+}
+
+.pipeline-info {
+  background: white;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+}
+
+.pipeline-info-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.info-label {
+  font-size: 10px;
+  color: #6b7280;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.info-value {
+  font-size: 13px;
+  color: #1f2937;
+  font-weight: 500;
+  font-family: 'Monaco', 'Courier New', monospace;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-badge.status-success {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.status-badge.status-failed {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.status-badge.status-running {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.status-badge.status-pending,
+.status-badge.status-created {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.status-badge.status-canceled,
+.status-badge.status-cancelled {
+  background-color: #f3f4f6;
+  color: #4b5563;
+}
+
+.status-badge.status-skipped {
+  background-color: #e0e7ff;
+  color: #4338ca;
+}
+
+.gitlab-link {
+  color: #fc6d26;
+  text-decoration: none;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.2s;
+}
+
+.gitlab-link:hover {
+  color: #e24329;
+  text-decoration: underline;
+}
+
+.legend {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 8px 16px;
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  justify-content: center;
+  align-items: center;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #4b5563;
+}
+
+.legend-box {
+  width: 24px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.legend-box.solid {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.legend-box.dashed {
+  background: repeating-linear-gradient(
+    90deg,
+    #9ca3af 0px,
+    #9ca3af 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+
+.navigation-hint {
+  margin-top: 16px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+kbd {
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 10px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.1);
+}
+
+.loading,
+.error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  gap: 16px;
+}
+
+.spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid #f3f4f6;
+  border-top: 4px solid #fc6d26;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.loading p {
+  color: #6b7280;
+  font-size: 16px;
+}
+
+.error {
+  background: #fef2f2;
+  border: 2px solid #fee2e2;
+  border-radius: 8px;
+  padding: 48px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.error h2 {
+  color: #991b1b;
+  margin: 0 0 16px 0;
+}
+
+.error p {
+  color: #7f1d1d;
+  margin: 8px 0;
+}
+
+.error code {
+  background: #fee2e2;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-family: 'Monaco', 'Courier New', monospace;
+  display: inline-block;
+  margin-top: 8px;
+  color: #991b1b;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .app {
+    padding: 8px;
+  }
+
+  .app-header {
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .app-header h1 {
+    font-size: 20px;
+  }
+
+  .pipeline-info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 8px 12px;
+  }
+
+  .legend {
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 6px 12px;
+  }
+}

@@ -1,0 +1,1 @@
+{"root":["./fetch-pipelines.ts","./fetching/cache.ts","./fetching/cachedgitlabclient.ts","./fetching/fetcher.ts","./fetching/gitlabclient.ts","./fetching/transformer.ts","./fetching/types.ts","./fetching/ui/usefetchstate.ts","./types/gitlab.ts","./fetching/ui/fetchapp.tsx","./fetching/ui/fetchui.tsx"],"version":"5.9.3"}
