@@ -8,6 +8,7 @@
 
 import React from 'react';
 import { Box, Text, Newline } from 'ink';
+import Spinner from 'ink-spinner';
 import type { ApiMetricsSummary } from '../apiMetrics.js';
 import type { LogMessage, TaskStats } from '../types.js';
 
@@ -41,6 +42,11 @@ export const GenericFetchUI: React.FC<GenericFetchUIProps> = ({ title, subtitle,
     return '⚙️';
   };
 
+  const isActive = () => {
+    const phase = stats.phase.toLowerCase();
+    return !['complete', 'done', 'error'].includes(phase);
+  };
+
   // Only show last 10 warnings/errors
   const recentLogs = logs.slice(-10);
 
@@ -67,7 +73,7 @@ export const GenericFetchUI: React.FC<GenericFetchUIProps> = ({ title, subtitle,
         <Box flexDirection="column" width="100%">
           <Box marginBottom={1}>
             <Text>
-              {getPhaseEmoji()} <Text bold>{stats.phase}</Text>
+              {isActive() && <><Spinner /> </>}{getPhaseEmoji()} <Text bold>{stats.phase}</Text>
             </Text>
           </Box>
 
