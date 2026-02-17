@@ -128,32 +128,67 @@ function toDateStr(isoDate: string | null): string {
 
 /**
  * 1. failures-by-category-over-time.csv
- * Columns: date, system_failure, script_failure, timeout, infrastructure, unknown, total
+ * Columns: date, [category columns], [pattern label columns], total
  */
 function generateCategoryOverTime(jobs: FailedJobInfo[]): string {
-  // Group by date → category counts
-  const dayCounts = new Map<string, Record<FailureCategory, number>>();
+  // First pass: collect all unique pattern labels
+  const allPatterns = new Set<string>();
+  for (const job of jobs) {
+    for (const failure of job.failures) {
+      allPatterns.add(failure.pattern);
+    }
+  }
+  const sortedPatterns = [...allPatterns].sort();
+
+  // Group by date → category counts + pattern counts
+  const dayCounts = new Map<string, {
+    categories: Record<FailureCategory, number>;
+    patterns: Record<string, number>;
+  }>();
 
   for (const job of jobs) {
     const date = toDateStr(job.pipelineCreatedAt);
     if (!date) continue;
 
     if (!dayCounts.has(date)) {
-      dayCounts.set(date, { system_failure: 0, script_failure: 0, user_failure: 0, internal_failure: 0, timeout: 0, infrastructure: 0, unknown: 0 });
+      const patternCounts: Record<string, number> = {};
+      for (const p of sortedPatterns) {
+        patternCounts[p] = 0;
+      }
+      dayCounts.set(date, {
+        categories: { system_failure: 0, script_failure: 0, user_failure: 0, internal_failure: 0, timeout: 0, infrastructure: 0, unknown: 0 },
+        patterns: patternCounts,
+      });
     }
     const counts = dayCounts.get(date)!;
+    
+    // Count primary category
     const cat = primaryCategory(job);
-    counts[cat]++;
+    counts.categories[cat]++;
+    
+    // Count all patterns for this job
+    for (const failure of job.failures) {
+      counts.patterns[failure.pattern] = (counts.patterns[failure.pattern] || 0) + 1;
+    }
   }
 
   // Sort by date
   const sortedDates = [...dayCounts.keys()].sort();
 
-  const rows = [csvRow(['date', ...ALL_CATEGORIES, 'total'])];
+  // Build header
+  const header = ['date', ...ALL_CATEGORIES, ...sortedPatterns, 'total'];
+  const rows = [csvRow(header)];
+
   for (const date of sortedDates) {
     const c = dayCounts.get(date)!;
-    const total = ALL_CATEGORIES.reduce((sum, cat) => sum + c[cat], 0);
-    rows.push(csvRow([date, ...ALL_CATEGORIES.map((cat) => c[cat]), total]));
+    const categoryTotal = ALL_CATEGORIES.reduce((sum, cat) => sum + c.categories[cat], 0);
+    const row = [
+      date,
+      ...ALL_CATEGORIES.map((cat) => c.categories[cat]),
+      ...sortedPatterns.map((p) => c.patterns[p] || 0),
+      categoryTotal,
+    ];
+    rows.push(csvRow(row));
   }
 
   return rows.join('\n');

@@ -27,10 +27,6 @@ const FAILURE_PATTERNS: FailurePattern[] = [
     pattern: /Error: Affected item .* does not have a changeset!/i,
     label: 'missing_changeset',
   },
-  /**
-   * Failed:    web-customer-happiness#test:e2e
-   *  ERROR  run failed: command  exited (1)
-   */
   {
     category: 'user_failure',
     pattern: /\s*Failed:\s+.+\n\s*Error\s*run\s+failed:\s+command\s+exited\s+\(\d+\)/i,
@@ -52,7 +48,12 @@ const FAILURE_PATTERNS: FailurePattern[] = [
     pattern: /ERR_PNPM_LOCKFILE_MISSING_DEPENDENCY.+Broken lockfile/i,
     label: 'broken_lockfile',
   },
-    {
+  {
+    category: 'user_failure',
+    pattern: /ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.+Cannot proceed with the frozen installation/i,
+    label: 'lockfile_config_mismatch',
+  },
+   {
     category: 'user_failure',
     pattern: /Syncpack validation failed!/i,
     label: 'syncpack_validation',
@@ -102,7 +103,18 @@ const FAILURE_PATTERNS: FailurePattern[] = [
   {
     category: 'system_failure',
     pattern: /ERR_PNPM_FETCH_401.*GET.*Unauthorized - 401/i,
-    label: 'nexus_auth_error',
+    label: 'nexus_401_error',
+  },
+  // Same as above, but for npm i -g
+  {
+    category: 'system_failure',
+    pattern: /npm error code E401\nnpm error Unable to authenticate, need: BASIC realm="Sonatype Nexus Repository Manager"/i,
+    label: 'nexus_401_error',
+  },
+  {
+    category: 'system_failure',
+    pattern: /ERR_PNPM_FETCH_404.*GET.*Not Found - 404/i,
+    label: 'nexus_404_error',
   },
   {
     category: 'system_failure',
