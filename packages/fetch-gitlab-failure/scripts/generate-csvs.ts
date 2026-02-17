@@ -3,11 +3,12 @@
 /**
  * Generate CSV files from a failures.json for Google Sheets analysis.
  *
- * Reads a FailureFetchResult JSON and produces 4 CSV files:
+ * Reads a FailureFetchResult JSON and produces 5 CSV files:
  *   1. failures-by-category-over-time.csv  — daily counts by failure category
  *   2. failures-by-job-name.csv            — per-job failure stats
  *   3. failures-by-runner.csv              — per-runner failure stats
  *   4. failure-details.csv                 — one row per failed job (or per failure pattern)
+ *   5. job-summary.csv                     — one row per job with root cause failure only
  *
  * Usage:
  *   npx tsx packages/fetch-gitlab-failure/scripts/generate-csvs.ts [--input <failures.json>] [--output-dir <dir>]
@@ -29,6 +30,8 @@ const __dirname = dirname(__filename);
 const ALL_CATEGORIES: FailureCategory[] = [
   'system_failure',
   'script_failure',
+  'user_failure',
+  'internal_failure',
   'timeout',
   'infrastructure',
   'unknown',
@@ -136,7 +139,7 @@ function generateCategoryOverTime(jobs: FailedJobInfo[]): string {
     if (!date) continue;
 
     if (!dayCounts.has(date)) {
-      dayCounts.set(date, { system_failure: 0, script_failure: 0, timeout: 0, infrastructure: 0, unknown: 0 });
+      dayCounts.set(date, { system_failure: 0, script_failure: 0, user_failure: 0, internal_failure: 0, timeout: 0, infrastructure: 0, unknown: 0 });
     }
     const counts = dayCounts.get(date)!;
     const cat = primaryCategory(job);
@@ -173,7 +176,7 @@ function generateByJobName(jobs: FailedJobInfo[]): string {
     if (!jobStats.has(job.jobName)) {
       jobStats.set(job.jobName, {
         stage: job.stage,
-        counts: { system_failure: 0, script_failure: 0, timeout: 0, infrastructure: 0, unknown: 0 },
+        counts: { system_failure: 0, script_failure: 0, user_failure: 0, internal_failure: 0, timeout: 0, infrastructure: 0, unknown: 0 },
         total: 0,
         durations: [],
         errorPatterns: new Map(),
@@ -242,7 +245,7 @@ function generateByRunner(jobs: FailedJobInfo[]): string {
     if (!runnerStats.has(runnerId)) {
       runnerStats.set(runnerId, {
         description: runnerDesc,
-        counts: { system_failure: 0, script_failure: 0, timeout: 0, infrastructure: 0, unknown: 0 },
+        counts: { system_failure: 0, script_failure: 0, user_failure: 0, internal_failure: 0, timeout: 0, infrastructure: 0, unknown: 0 },
         total: 0,
       });
     }
@@ -273,14 +276,14 @@ function generateByRunner(jobs: FailedJobInfo[]): string {
  * One row per failed job. If a job has multiple failure patterns, one row per pattern.
  * Columns: date, pipeline_iid, pipeline_ref, pipeline_source, job_name, stage,
  *          allow_failure, duration_s, queued_duration_s, failure_category,
- *          failure_pattern, matched_text, runner_id, runner_description, job_url
+ *          failure_pattern, matched_text, runner_id, runner_description, job_id, job_url
  */
 function generateDetails(jobs: FailedJobInfo[]): string {
   const header = csvRow([
     'date', 'pipeline_iid', 'pipeline_ref', 'pipeline_source',
     'job_name', 'stage', 'allow_failure', 'duration_s', 'queued_duration_s',
     'failure_category', 'failure_pattern', 'matched_text',
-    'runner_id', 'runner_description', 'job_url',
+    'runner_id', 'runner_description', 'job_id', 'job_url',
   ]);
 
   const rows = [header];
@@ -303,6 +306,7 @@ function generateDetails(jobs: FailedJobInfo[]): string {
         ...baseRow,
         'unknown', '', '',
         job.runner?.id ?? '', job.runner?.description ?? '',
+        job.jobId,
         job.webUrl,
       ]));
     } else {
@@ -311,10 +315,55 @@ function generateDetails(jobs: FailedJobInfo[]): string {
           ...baseRow,
           f.category, f.pattern, f.matchedText,
           job.runner?.id ?? '', job.runner?.description ?? '',
+          job.jobId,
           job.webUrl,
         ]));
       }
     }
+  }
+
+  return rows.join('\n');
+}
+
+/**
+ * 5. job-summary.csv
+ * One row per failed job, showing only the root cause (highest priority) failure.
+ * Columns: date, pipeline_iid, pipeline_ref, pipeline_source, job_name, stage,
+ *          allow_failure, duration_s, queued_duration_s, failure_category,
+ *          failure_pattern, matched_text, runner_id, runner_description, job_id, job_url
+ */
+function generateJobSummary(jobs: FailedJobInfo[]): string {
+  const header = csvRow([
+    'date', 'pipeline_iid', 'pipeline_ref', 'pipeline_source',
+    'job_name', 'stage', 'allow_failure', 'duration_s', 'queued_duration_s',
+    'failure_category', 'failure_pattern', 'matched_text',
+    'runner_id', 'runner_description', 'job_id', 'job_url',
+  ]);
+
+  const rows = [header];
+
+  for (const job of jobs) {
+    // Get the first (highest priority) failure
+    const rootFailure = job.failures.length > 0 ? job.failures[0] : null;
+
+    rows.push(csvRow([
+      toDateStr(job.pipelineCreatedAt),
+      job.pipelineIid,
+      job.pipelineRef,
+      job.pipelineSource ?? '',
+      job.jobName,
+      job.stage,
+      job.allowFailure,
+      job.duration ?? '',
+      job.queuedDuration ?? '',
+      rootFailure?.category ?? 'unknown',
+      rootFailure?.pattern ?? '',
+      rootFailure?.matchedText ?? '',
+      job.runner?.id ?? '',
+      job.runner?.description ?? '',
+      job.jobId,
+      job.webUrl,
+    ]));
   }
 
   return rows.join('\n');
@@ -336,6 +385,7 @@ function main() {
     ['failures-by-job-name.csv', generateByJobName(data.jobs)],
     ['failures-by-runner.csv', generateByRunner(data.jobs)],
     ['failure-details.csv', generateDetails(data.jobs)],
+    ['job-summary.csv', generateJobSummary(data.jobs)],
   ];
 
   for (const [filename, content] of files) {

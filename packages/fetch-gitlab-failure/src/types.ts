@@ -5,8 +5,10 @@
 // ─── Failure Categories ──────────────────────────────────────────────────────
 
 export type FailureCategory =
-  | 'system_failure'
-  | 'script_failure'
+  | 'system_failure' // Issues in the GitLab infrastructure, runner connectivity, kubernetes, etc.
+  | 'script_failure' // Generic script failures. More specific patterns (e.g., turbo task failures) are in user or internal failure categories.
+  | 'user_failure' // E.g., test failures, lint errors, etc. actionable by the user
+  | 'internal_failure' // Not necessarily user issues, but issues in the monorepo pipeline setup
   | 'timeout'
   | 'infrastructure'
   | 'unknown';
