@@ -1,0 +1,15 @@
+{
+  "name": "@gitlab-analysis/fetcher-core",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Generic fetch orchestration framework with Ink TUI",
+  "main": "src/index.ts",
+  "scripts": {},
+  "dependencies": {
+    "ink": "^6.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "typescript": "~5.9.3"
+  }
+}

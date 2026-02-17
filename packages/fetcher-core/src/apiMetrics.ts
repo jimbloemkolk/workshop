@@ -1,5 +1,8 @@
 /**
- * API metrics tracker for monitoring API call performance
+ * API metrics tracker for monitoring API call performance.
+ * 
+ * Fully generic — tracks duration and categorizes by endpoint name.
+ * Shared across all API calls in the process.
  */
 
 export interface ApiCallMetrics {
@@ -93,5 +96,5 @@ export class ApiMetricsTracker {
   }
 }
 
-// Global singleton instance
+/** Global singleton instance shared across all API calls in the process */
 export const apiMetrics = new ApiMetricsTracker();

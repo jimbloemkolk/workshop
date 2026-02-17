@@ -11,7 +11,9 @@
     "build": "cd packages/app && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "cd packages/app && vite preview",
-    "fetch": "tsx packages/fetcher/fetch-pipelines.ts",
+    "fetch": "tsx packages/fetch-pipelines/fetch-pipelines.ts",
+    "fetch:pipelines": "tsx packages/fetch-pipelines/fetch-pipelines.ts",
+    "fetch:job-logs": "tsx packages/fetch-job-logs/fetch-job-logs.ts",
     "transform": "tsx packages/transform/src/cli.ts",
     "discover-datasets": "tsx packages/app/scripts/discover-datasets.ts"
   },

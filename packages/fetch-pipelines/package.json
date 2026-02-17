@@ -1,13 +1,15 @@
 {
-  "name": "@gitlab-analysis/fetcher",
+  "name": "@gitlab-analysis/fetch-pipelines",
   "version": "1.0.0",
   "type": "module",
-  "description": "GitLab pipeline data fetcher",
-  "main": "fetch-pipelines.ts",
+  "description": "Fetch GitLab pipeline data — entry point using shared fetcher framework",
+  "main": "src/index.ts",
   "scripts": {
     "fetch": "tsx fetch-pipelines.ts"
   },
   "dependencies": {
+    "@gitlab-analysis/gitlab-api": "*",
+    "@gitlab-analysis/fetcher-core": "*",
     "ink": "^6.5.1"
   },
   "devDependencies": {

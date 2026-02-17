@@ -1,12 +1,9 @@
-export interface FetchOptions {
-  projectPath: string;
-  daysBack?: number;
-  singlePipelineId?: number;
-  outputToStdout?: boolean;
-  rebuild?: boolean;
-  debug?: boolean;
-  datasetName?: string;
-}
+/**
+ * GitLab API response types.
+ * 
+ * These represent the raw shapes returned by the GitLab REST and GraphQL APIs.
+ * They are intentionally close to the API response format, not domain-specific.
+ */
 
 export interface GitLabPipelineBasic {
   id: number;
@@ -73,21 +70,6 @@ export interface TriggerJob {
   previousStageJobs?: string[];
 }
 
-export interface GitLabPipelineFull extends GitLabPipelineBasic {
-  jobs: GitLabJob[];
-  child_pipelines?: GitLabPipelineFull[];
-  trigger_job?: TriggerJob;
-  fetched_at: string;
-}
-
-export interface JobMetadata {
-  schedulingType?: 'dag' | 'stage';
-  needs?: string[];
-  previousStageJobs?: string[];
-  when?: string;
-  retried?: boolean;
-}
-
 export interface GraphQLResponse {
   data?: {
     project?: {
@@ -99,33 +81,11 @@ export interface GraphQLResponse {
   };
 }
 
-export interface CacheEntry<T> {
-  data: T;
-  cachedAt: string;
-  pipelineStatus: string;
-}
-
-export interface FailedPipeline {
-  pipelineId: number;
-  pipelineIid: number;
-  pipelineRef: string;
-  error: string;
-}
-
-export interface FetchResult {
-  pipelines: GitLabPipelineFull[];
-  failed: FailedPipeline[];
-  metadata: {
-    dataset_name: string;
-    project: string;
-    fetched_at: string;
-    days_back: number;
-    date_threshold: string;
-    pipeline_count: number;
-    new_pipelines: number;
-    existing_pipelines: number;
-    failed_pipelines: number;
-    cached_pipelines: number;
-    failed_pipeline_details: FailedPipeline[];
-  };
+/** Metadata extracted from GraphQL for a single job */
+export interface JobMetadata {
+  schedulingType?: 'dag' | 'stage';
+  needs?: string[];
+  previousStageJobs?: string[];
+  when?: string;
+  retried?: boolean;
 }

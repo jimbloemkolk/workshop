@@ -1,0 +1,20 @@
+{
+  "name": "@gitlab-analysis/fetch-job-logs",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Fetch GitLab pipeline job logs — entry point using shared fetcher framework",
+  "main": "src/index.ts",
+  "scripts": {
+    "fetch": "tsx fetch-job-logs.ts"
+  },
+  "dependencies": {
+    "@gitlab-analysis/gitlab-api": "*",
+    "@gitlab-analysis/fetcher-core": "*",
+    "ink": "^6.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "tsx": "^4.19.2",
+    "typescript": "~5.9.3"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@gitlab-analysis/gitlab-api",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "GitLab API client with transport abstraction and endpoint-based caching",
+  "main": "src/index.ts",
+  "scripts": {},
+  "dependencies": {
+    "@gitlab-analysis/fetcher-core": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "typescript": "~5.9.3"
+  }
+}
