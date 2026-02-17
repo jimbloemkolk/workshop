@@ -1,11 +1,11 @@
 {
-  "name": "@gitlab-analysis/fetch-job-logs",
+  "name": "@gitlab-analysis/fetch-gitlab-failure",
   "version": "1.0.0",
   "type": "module",
-  "description": "Fetch GitLab pipeline job logs — entry point using shared fetcher framework",
+  "description": "Fetch GitLab pipeline failure data — finds failed pipelines, downloads job logs, parses failure reasons",
   "main": "src/index.ts",
   "scripts": {
-    "fetch": "tsx fetch-job-logs.ts"
+    "fetch": "tsx fetch-gitlab-failure.ts"
   },
   "dependencies": {
     "@gitlab-analysis/gitlab-api": "*",

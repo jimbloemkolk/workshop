@@ -13,7 +13,8 @@
     "preview": "cd packages/app && vite preview",
     "fetch": "tsx packages/fetch-pipelines/fetch-pipelines.ts",
     "fetch:pipelines": "tsx packages/fetch-pipelines/fetch-pipelines.ts",
-    "fetch:job-logs": "tsx packages/fetch-job-logs/fetch-job-logs.ts",
+    "fetch:failures": "tsx packages/fetch-gitlab-failure/fetch-gitlab-failure.ts",
+    "failures:csv": "tsx packages/fetch-gitlab-failure/scripts/generate-csvs.ts",
     "transform": "tsx packages/transform/src/cli.ts",
     "discover-datasets": "tsx packages/app/scripts/discover-datasets.ts"
   },

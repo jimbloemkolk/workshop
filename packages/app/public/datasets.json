@@ -1,29 +1,11 @@
 [
   {
-    "name": "energy-backend",
-    "displayName": "energy-backend",
-    "project": "anwb/finance-and-services/anwb-energie/development/energy-backend",
-    "fetched_at": "2025-12-04T12:28:56.166Z",
-    "days_back": 21,
-    "pipeline_count": 238,
-    "path": "/datasets/energy-backend"
-  },
-  {
     "name": "energy-mobile-app",
     "displayName": "energy-mobile-app",
     "project": "anwb/finance-and-services/anwb-energie/development/energy-mobile-app",
-    "fetched_at": "2025-12-04T12:27:50.374Z",
-    "days_back": 21,
-    "pipeline_count": 861,
-    "path": "/datasets/energy-mobile-app"
-  },
-  {
-    "name": "energy-mobile-app-pre-merge",
-    "displayName": "energy-mobile-app-pre-merge",
-    "project": "anwb/finance-and-services/anwb-energie/development/energy-mobile-app",
-    "fetched_at": "2025-11-13T07:22:53.734Z",
-    "days_back": 50,
-    "pipeline_count": 1733,
-    "path": "/datasets/energy-mobile-app-pre-merge"
+    "fetched_at": "2026-02-17T10:33:43.455Z",
+    "days_back": 30,
+    "pipeline_count": 1065,
+    "path": "datasets/energy-mobile-app"
   }
 ]

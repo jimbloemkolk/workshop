@@ -45,6 +45,14 @@ export {
   type JobMetadata,
 } from './types.js';
 
+// Pipeline traversal
+export {
+  collectJobsFromPipelineTree,
+  type JobWithPipelineContext,
+  type TraversalCallbacks,
+  type TraversalOptions,
+} from './traversal.js';
+
 // Metrics (re-exported from fetcher-core)
 export {
   apiMetrics,

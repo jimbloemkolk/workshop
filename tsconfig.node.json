@@ -23,5 +23,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["vite.config.ts", "packages/gitlab-api/src/**/*.ts", "packages/fetcher-core/src/**/*.ts", "packages/fetcher-core/src/**/*.tsx", "packages/fetch-pipelines/**/*.ts", "packages/fetch-job-logs/**/*.ts"]
+  "include": ["vite.config.ts", "packages/gitlab-api/src/**/*.ts", "packages/fetcher-core/src/**/*.ts", "packages/fetcher-core/src/**/*.tsx", "packages/fetch-pipelines/**/*.ts", "packages/fetch-gitlab-failure/**/*.ts"]
 }

@@ -25,3 +25,8 @@ dist-ssr
 
 # cached api responses
 .cache
+
+# datasets
+datasets
+datasets.json
+data

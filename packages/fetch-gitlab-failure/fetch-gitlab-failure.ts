@@ -1,32 +1,36 @@
 #!/usr/bin/env node
 
 /**
- * Entry point for fetching GitLab job logs.
- * 
+ * Entry point for fetching GitLab pipeline failure data.
+ *
  * This is a pure composition layer: it parses CLI args, creates the
  * transport/cache/task/writer instances, and hands off to the runner.
- * 
- * Usage: npx tsx fetch-job-logs.ts <project-path> [days] [options]
- * 
+ *
+ * Usage: npx tsx fetch-gitlab-failure.ts <project-path> [days] [options]
+ *
  * Options:
- *   --job-name <pattern>   Only fetch logs for jobs matching this name
  *   --stdout               Output to stdout instead of files
  *   --debug                Show detailed debug output (no TUI)
  *   --output-dir <dir>     Custom output directory
  */
 
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
 import { GlabTransport, ApiCache, getGitlabHostname, sanitizeHostname } from '@gitlab-analysis/gitlab-api';
 import { runFetchTask } from '@gitlab-analysis/fetcher-core';
 
-import { JobLogsFetchTask } from './src/task.js';
-import { JobLogsWriter } from './src/writer.js';
+import { FailureFetchTask } from './src/task.js';
+import { FailureWriter } from './src/writer.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ─── CLI Argument Parsing ────────────────────────────────────────────────────
 
 interface CliOptions {
   projectPath: string;
   daysBack: number;
-  jobNameFilter?: string;
   outputToStdout: boolean;
   debug: boolean;
   outputDir?: string;
@@ -35,22 +39,18 @@ interface CliOptions {
 function parseArgs(): CliOptions {
   const args = process.argv.slice(2);
   if (args.length < 1) {
-    console.error('Usage: npx tsx fetch-job-logs.ts <project-path> [days] [--job-name <pattern>] [--stdout] [--debug] [--output-dir <dir>]');
+    console.error('Usage: npx tsx fetch-gitlab-failure.ts <project-path> [days] [--stdout] [--debug] [--output-dir <dir>]');
     process.exit(1);
   }
 
   const projectPath = args[0];
-  let daysBack = 30;
-  let jobNameFilter: string | undefined;
+  let daysBack = 7;
   let outputToStdout = false;
   let debug = false;
   let outputDir: string | undefined;
 
   for (let i = 1; i < args.length; i++) {
-    if (args[i] === '--job-name' && i + 1 < args.length) {
-      jobNameFilter = args[i + 1];
-      i++;
-    } else if (args[i] === '--stdout') {
+    if (args[i] === '--stdout') {
       outputToStdout = true;
     } else if (args[i] === '--debug') {
       debug = true;
@@ -62,7 +62,7 @@ function parseArgs(): CliOptions {
     }
   }
 
-  return { projectPath, daysBack, jobNameFilter, outputToStdout, debug, outputDir };
+  return { projectPath, daysBack, outputToStdout, debug, outputDir };
 }
 
 // ─── Composition ─────────────────────────────────────────────────────────────
@@ -70,7 +70,7 @@ function parseArgs(): CliOptions {
 async function main() {
   const options = parseArgs();
 
-  // Shared infrastructure — same transport and cache as fetch-pipelines
+  // Shared infrastructure — same transport and cache as other fetchers
   const transport = new GlabTransport();
   const cache = new ApiCache();
 
@@ -78,26 +78,41 @@ async function main() {
   const hostname = await getGitlabHostname();
   const cacheNamespace = sanitizeHostname(hostname);
 
-  const task = new JobLogsFetchTask({
+  // Output directory: local to this package — data/{host}-{project}-failures/
+  const sanitizedProject = options.projectPath.replace(/\//g, '-');
+  const defaultOutputDir = join(
+    __dirname, 'data',
+    `${cacheNamespace}-${sanitizedProject}-failures`,
+  );
+  const outputDir = options.outputDir ?? defaultOutputDir;
+
+  const task = new FailureFetchTask({
     projectPath: options.projectPath,
     daysBack: options.daysBack,
-    jobNameFilter: options.jobNameFilter,
     transport,
     cache,
     cacheNamespace,
   });
 
-  const writer = new JobLogsWriter();
+  const writer = new FailureWriter();
 
   await runFetchTask(task, writer, {
     stdout: options.outputToStdout,
     debug: options.debug,
     subtitle: `Project: ${options.projectPath} • Last ${options.daysBack} days`,
-    outputDir: options.outputDir,
+    outputDir,
   });
 }
 
 main().catch((error) => {
-  console.error('\n❌ Error:', error.message || String(error));
+  const errorMessage = error.message || String(error);
+
+  if (errorMessage.includes('403 Forbidden')) {
+    console.error('\n❌ Error: Not authorized to access GitLab API');
+    console.error('\nPlease authenticate with glab:');
+    console.error('  glab auth login');
+  } else {
+    console.error('\n❌ Error:', errorMessage);
+  }
   process.exit(1);
 });

@@ -16,5 +16,5 @@
     "jsx": "react",
     "outDir": "./dist"
   },
-  "include": ["src", "fetch-job-logs.ts"]
+  "include": ["src", "fetch-gitlab-failure.ts", "scripts"]
 }
