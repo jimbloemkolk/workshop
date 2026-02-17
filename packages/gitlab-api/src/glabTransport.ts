@@ -11,14 +11,17 @@ import type { Transport } from './transport.js';
 
 const execPromise = promisify(exec);
 
+// Job logs can be very large (50MB+), so we need a large maxBuffer
+const LARGE_BUFFER = 100 * 1024 * 1024; // 100MB
+
 export class GlabTransport implements Transport {
   async restGet(path: string): Promise<string> {
-    const { stdout } = await execPromise(`glab api ${path}`);
+    const { stdout } = await execPromise(`glab api ${path}`, { maxBuffer: LARGE_BUFFER });
     return stdout;
   }
 
   async restGetPaginated(path: string): Promise<string> {
-    const { stdout } = await execPromise(`glab api --paginate ${path}`);
+    const { stdout } = await execPromise(`glab api --paginate ${path}`, { maxBuffer: LARGE_BUFFER });
 
     // --paginate returns JSON arrays concatenated like: [...][...][...]
     // We need to merge them into a single array
@@ -41,7 +44,7 @@ export class GlabTransport implements Transport {
 
   async graphql(query: string): Promise<string> {
     const escapedQuery = query.replace(/'/g, "'\\''");
-    const { stdout } = await execPromise(`glab api graphql -f query='${escapedQuery}'`);
+    const { stdout } = await execPromise(`glab api graphql -f query='${escapedQuery}'`, { maxBuffer: LARGE_BUFFER });
     return stdout;
   }
 }
