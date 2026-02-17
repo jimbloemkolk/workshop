@@ -162,13 +162,14 @@ function generateCategoryOverTime(jobs: FailedJobInfo[]): string {
     }
     const counts = dayCounts.get(date)!;
     
-    // Count primary category
+    // Count root cause (primary) category only
     const cat = primaryCategory(job);
     counts.categories[cat]++;
     
-    // Count all patterns for this job
-    for (const failure of job.failures) {
-      counts.patterns[failure.pattern] = (counts.patterns[failure.pattern] || 0) + 1;
+    // Count only the root cause pattern (first failure) per job
+    if (job.failures.length > 0) {
+      const rootFailure = job.failures[0];
+      counts.patterns[rootFailure.pattern] = (counts.patterns[rootFailure.pattern] || 0) + 1;
     }
   }
 
@@ -223,9 +224,10 @@ function generateByJobName(jobs: FailedJobInfo[]): string {
     stats.counts[cat]++;
     if (job.duration != null) stats.durations.push(job.duration);
 
-    // Track most common error pattern
-    for (const f of job.failures) {
-      const key = `${f.pattern}: ${f.matchedText.slice(0, 100)}`;
+    // Track most common error pattern (root cause only)
+    if (job.failures.length > 0) {
+      const rootFailure = job.failures[0];
+      const key = `${rootFailure.pattern}: ${rootFailure.matchedText.slice(0, 100)}`;
       stats.errorPatterns.set(key, (stats.errorPatterns.get(key) ?? 0) + 1);
     }
   }
