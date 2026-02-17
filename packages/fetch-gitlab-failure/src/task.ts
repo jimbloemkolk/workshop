@@ -137,7 +137,7 @@ export class FailureFetchTask implements FetchTask<FailureFetchResult> {
             context.log('warning', `Could not fetch log for job #${job.id} (${job.name}): ${err}`);
           }
 
-          const failures = logText ? parseFailureReasons(logText) : [];
+          const failures = parseFailureReasons(logText);
           const rawLogExcerpt = logText ? extractLogExcerpt(logText, failures) : '';
 
           const info: FailedJobInfo = {
