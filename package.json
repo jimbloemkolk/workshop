@@ -15,6 +15,7 @@
     "failures:csv": "tsx packages/gitlab/fetch-gitlab-failure/scripts/generate-csvs.ts",
     "transform": "tsx packages/gitlab/transform/src/cli.ts",
     "discover-datasets": "tsx packages/gitlab/app/scripts/discover-datasets.ts",
+    "crawl": "tsx packages/resolver-visualizer/crawl.ts",
     "check": "pnpm -r run check"
   },
   "devDependencies": {
