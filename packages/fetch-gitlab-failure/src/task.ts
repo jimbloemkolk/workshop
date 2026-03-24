@@ -60,12 +60,14 @@ export class FailureFetchTask implements FetchTask<FailureFetchResult> {
     context.log('info', `Found ${allPipelines.length} total pipelines in last ${daysBack} days`);
     context.setDetail('Total Pipelines', allPipelines.length);
 
-    // ── Phase 2: Walk all pipeline trees and collect failed jobs ────────────
-    // Failed jobs can exist in any pipeline (retries, allow_failure, child pipelines)
+    // ── Phase 2: Walk all pipeline trees and collect jobs ────────────
+    // Collect all jobs to get success/failure statistics, then filter for analysis.
+    // Jobs can exist in any pipeline (retries, allow_failure, child pipelines)
     // so we traverse each pipeline tree including downstream children.
-    context.updatePhase('Scanning pipelines for failed jobs');
+    context.updatePhase('Scanning pipelines for jobs');
     context.updateProgress(0, allPipelines.length);
 
+    const allJobs: JobWithPipelineContext[] = [];
     const allFailedJobs: JobWithPipelineContext[] = [];
     let pipelinesWithFailedJobs = 0;
     const concurrency = 5;
@@ -84,7 +86,6 @@ export class FailureFetchTask implements FetchTask<FailureFetchResult> {
             transport, cache, cacheNamespace, projectPath, pipeline, {
               apiOptions: alwaysCache(),
               callbacks: {
-                filterJob: (job) => job.status === 'failed',
                 onProgress: (msg) => context.log('info', msg),
               },
             },
@@ -93,9 +94,14 @@ export class FailureFetchTask implements FetchTask<FailureFetchResult> {
       );
 
       for (const result of results) {
-        if (result.status === 'fulfilled' && result.value.length > 0) {
-          allFailedJobs.push(...result.value);
-          pipelinesWithFailedJobs++;
+        if (result.status === 'fulfilled') {
+          const jobs = result.value;
+          allJobs.push(...jobs);
+          const failedInPipeline = jobs.filter(j => j.job.status === 'failed');
+          if (failedInPipeline.length > 0) {
+            allFailedJobs.push(...failedInPipeline);
+            pipelinesWithFailedJobs++;
+          }
         } else if (result.status === 'rejected') {
           context.log('error', `Failed to scan pipeline: ${result.reason}`);
         }
@@ -104,11 +110,15 @@ export class FailureFetchTask implements FetchTask<FailureFetchResult> {
       pipelineIndex += concurrency;
       context.updateProgress(Math.min(pipelineIndex, allPipelines.length), allPipelines.length);
       context.setDetail('Pipelines w/ Failures', pipelinesWithFailedJobs);
+      context.setDetail('Total Jobs', allJobs.length);
       context.setDetail('Failed Jobs', allFailedJobs.length);
       context.reportApiMetrics(apiMetrics.getSummary());
     }
 
-    context.log('info', `Found ${allFailedJobs.length} failed jobs across ${pipelinesWithFailedJobs} pipelines (scanned ${allPipelines.length} total)`);
+    const successfulJobs = allJobs.filter(j => j.job.status === 'success').length;
+    context.log('info', `Found ${allJobs.length} total jobs: ${successfulJobs} successful, ${allFailedJobs.length} failed (across ${pipelinesWithFailedJobs}/${allPipelines.length} pipelines)`);
+    context.setDetail('Successful Jobs', successfulJobs);
+    context.setDetail('Total Jobs', allJobs.length);
     context.setDetail('Failed Jobs', allFailedJobs.length);
 
     // ── Phase 3: Fetch logs & parse ────────────────────────────────────────
@@ -180,6 +190,33 @@ export class FailureFetchTask implements FetchTask<FailureFetchResult> {
     }
 
     context.setDetail('Parsed Jobs', failedJobInfos.length);
+    
+    // ── Calculate daily statistics ─────────────────────────────────────────
+    const dailyStatsMap = new Map<string, { total: number; successful: number; failed: number }>();
+    
+    for (const { job, pipeline } of allJobs) {
+      const date = pipeline.created_at.slice(0, 10); // YYYY-MM-DD
+      if (!dailyStatsMap.has(date)) {
+        dailyStatsMap.set(date, { total: 0, successful: 0, failed: 0 });
+      }
+      const stats = dailyStatsMap.get(date)!;
+      stats.total++;
+      if (job.status === 'success') {
+        stats.successful++;
+      } else if (job.status === 'failed') {
+        stats.failed++;
+      }
+    }
+    
+    const dailyStats = [...dailyStatsMap.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, stats]) => ({
+        date,
+        totalJobs: stats.total,
+        successfulJobs: stats.successful,
+        failedJobs: stats.failed,
+      }));
+
     context.updatePhase('Complete');
 
     return {
@@ -190,6 +227,9 @@ export class FailureFetchTask implements FetchTask<FailureFetchResult> {
         scannedPipelines: allPipelines.length,
         failedPipelines: pipelinesWithFailedJobs,
         failedJobs: failedJobInfos.length,
+        successfulJobs,
+        totalJobs: allJobs.length,
+        dailyStats,
         fetchedAt: now.toISOString(),
         timeRange: {
           from: createdAfterISO,

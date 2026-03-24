@@ -22,7 +22,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from '
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
-import type { FailureFetchResult, FailedJobInfo, FailureCategory } from '../src/types.js';
+import type { FailureFetchResult, FailedJobInfo, FailureCategory, DailyJobStats } from '../src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -128,9 +128,9 @@ function toDateStr(isoDate: string | null): string {
 
 /**
  * 1. failures-by-category-over-time.csv
- * Columns: date, [category columns], [pattern label columns], total
+ * Columns: date, successful_jobs, total_jobs, [category columns], [pattern label columns], failed_jobs_total
  */
-function generateCategoryOverTime(jobs: FailedJobInfo[]): string {
+function generateCategoryOverTime(jobs: FailedJobInfo[], dailyStats: DailyJobStats[]): string {
   // First pass: collect all unique pattern labels
   const allPatterns = new Set<string>();
   for (const job of jobs) {
@@ -139,6 +139,12 @@ function generateCategoryOverTime(jobs: FailedJobInfo[]): string {
     }
   }
   const sortedPatterns = [...allPatterns].sort();
+
+  // Create a map of daily stats for quick lookup
+  const dailyStatsMap = new Map<string, DailyJobStats>();
+  for (const stat of dailyStats) {
+    dailyStatsMap.set(stat.date, stat);
+  }
 
   // Group by date → category counts + pattern counts
   const dayCounts = new Map<string, {
@@ -177,14 +183,17 @@ function generateCategoryOverTime(jobs: FailedJobInfo[]): string {
   const sortedDates = [...dayCounts.keys()].sort();
 
   // Build header
-  const header = ['date', ...ALL_CATEGORIES, ...sortedPatterns, 'total'];
+  const header = ['date', 'successful_jobs', 'total_jobs', ...ALL_CATEGORIES, ...sortedPatterns, 'failed_jobs_total'];
   const rows = [csvRow(header)];
 
   for (const date of sortedDates) {
     const c = dayCounts.get(date)!;
+    const stats = dailyStatsMap.get(date);
     const categoryTotal = ALL_CATEGORIES.reduce((sum, cat) => sum + c.categories[cat], 0);
     const row = [
       date,
+      stats?.successfulJobs ?? 0,
+      stats?.totalJobs ?? 0,
       ...ALL_CATEGORIES.map((cat) => c.categories[cat]),
       ...sortedPatterns.map((p) => c.patterns[p] || 0),
       categoryTotal,
@@ -416,9 +425,10 @@ function main() {
   const data: FailureFetchResult = JSON.parse(raw);
 
   console.log(`📊 Processing ${data.jobs.length} failed jobs from ${data.metadata.failedPipelines} pipelines`);
+  console.log(`   Total jobs: ${data.metadata.totalJobs} | Successful: ${data.metadata.successfulJobs} | Failed: ${data.metadata.failedJobs}`);
 
   const files: Array<[string, string]> = [
-    ['failures-by-category-over-time.csv', generateCategoryOverTime(data.jobs)],
+    ['failures-by-category-over-time.csv', generateCategoryOverTime(data.jobs, data.metadata.dailyStats)],
     ['failures-by-job-name.csv', generateByJobName(data.jobs)],
     ['failures-by-runner.csv', generateByRunner(data.jobs)],
     ['failure-details.csv', generateDetails(data.jobs)],

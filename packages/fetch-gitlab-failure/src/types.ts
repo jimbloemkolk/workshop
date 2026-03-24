@@ -62,6 +62,14 @@ export interface FailedJobInfo {
 
 // ─── Fetch Result ────────────────────────────────────────────────────────────
 
+/** Daily job statistics */
+export interface DailyJobStats {
+  date: string; // YYYY-MM-DD
+  totalJobs: number;
+  successfulJobs: number;
+  failedJobs: number;
+}
+
 /** The complete result of a failure fetch run */
 export interface FailureFetchResult {
   jobs: FailedJobInfo[];
@@ -74,6 +82,9 @@ export interface FailureFetchMetadata {
   scannedPipelines: number;
   failedPipelines: number;
   failedJobs: number;
+  successfulJobs: number;
+  totalJobs: number;
+  dailyStats: DailyJobStats[];
   fetchedAt: string;
   timeRange: {
     from: string;
