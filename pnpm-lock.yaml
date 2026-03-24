@@ -33,7 +33,29 @@ importers:
         specifier: ^8.45.0
         version: 8.57.2(eslint@9.39.4)(typescript@5.9.3)
 
-  packages/app:
+  packages/fetcher-core:
+    dependencies:
+      ink:
+        specifier: ^6.5.1
+        version: 6.8.0(@types/react@19.2.14)(react@19.2.4)
+      ink-spinner:
+        specifier: ^5.0.0
+        version: 5.0.0(ink@6.8.0(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
+      react:
+        specifier: ^19.1.1
+        version: 19.2.4
+    devDependencies:
+      '@types/node':
+        specifier: ^24.6.0
+        version: 24.12.0
+      '@types/react':
+        specifier: ^19.1.16
+        version: 19.2.14
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+
+  packages/gitlab/app:
     dependencies:
       react:
         specifier: ^19.1.1
@@ -64,11 +86,11 @@ importers:
         specifier: ^7.1.7
         version: 7.3.1(@types/node@24.12.0)(tsx@4.21.0)
 
-  packages/fetch-gitlab-failure:
+  packages/gitlab/fetch-gitlab-failure:
     dependencies:
       '@workshop/fetcher-core':
         specifier: workspace:*
-        version: link:../fetcher-core
+        version: link:../../fetcher-core
       '@workshop/gitlab-api':
         specifier: workspace:*
         version: link:../gitlab-api
@@ -86,11 +108,11 @@ importers:
         specifier: ~5.9.3
         version: 5.9.3
 
-  packages/fetch-pipelines:
+  packages/gitlab/fetch-pipelines:
     dependencies:
       '@workshop/fetcher-core':
         specifier: workspace:*
-        version: link:../fetcher-core
+        version: link:../../fetcher-core
       '@workshop/gitlab-api':
         specifier: workspace:*
         version: link:../gitlab-api
@@ -108,33 +130,11 @@ importers:
         specifier: ~5.9.3
         version: 5.9.3
 
-  packages/fetcher-core:
-    dependencies:
-      ink:
-        specifier: ^6.5.1
-        version: 6.8.0(@types/react@19.2.14)(react@19.2.4)
-      ink-spinner:
-        specifier: ^5.0.0
-        version: 5.0.0(ink@6.8.0(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
-      react:
-        specifier: ^19.1.1
-        version: 19.2.4
-    devDependencies:
-      '@types/node':
-        specifier: ^24.6.0
-        version: 24.12.0
-      '@types/react':
-        specifier: ^19.1.16
-        version: 19.2.14
-      typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
-
-  packages/gitlab-api:
+  packages/gitlab/gitlab-api:
     dependencies:
       '@workshop/fetcher-core':
         specifier: workspace:*
-        version: link:../fetcher-core
+        version: link:../../fetcher-core
     devDependencies:
       '@types/node':
         specifier: ^24.6.0
@@ -143,7 +143,7 @@ importers:
         specifier: ~5.9.3
         version: 5.9.3
 
-  packages/transform:
+  packages/gitlab/transform:
     dependencies:
       chalk:
         specifier: ^5.3.0

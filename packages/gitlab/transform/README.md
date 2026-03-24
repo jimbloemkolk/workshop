@@ -15,27 +15,27 @@ The package includes a CLI tool for debugging transformations:
 
 ### List pipelines
 ```bash
-npm run transform -- list -f packages/app/public/data/pipelines.json
+npm run transform -- list -f packages/gitlab/app/public/data/pipelines.json
 ```
 
 ### Analyze dependencies for a pipeline
 ```bash
-npm run transform -- deps -f packages/app/public/data/pipelines.json -i 23904
+npm run transform -- deps -f packages/gitlab/app/public/data/pipelines.json -i 23904
 ```
 
 Filter to a specific job:
 ```bash
-npm run transform -- deps -f packages/app/public/data/pipelines.json -i 23904 -j lint_type_and_test
+npm run transform -- deps -f packages/gitlab/app/public/data/pipelines.json -i 23904 -j lint_type_and_test
 ```
 
 Output as JSON:
 ```bash
-npm run transform -- deps -f packages/app/public/data/pipelines.json -i 23904 --json
+npm run transform -- deps -f packages/gitlab/app/public/data/pipelines.json -i 23904 --json
 ```
 
 ### Show job details
 ```bash
-npm run transform -- job -f packages/app/public/data/pipelines.json -i 23904 -j 10728180
+npm run transform -- job -f packages/gitlab/app/public/data/pipelines.json -i 23904 -j 10728180
 ```
 
 ## API Usage
