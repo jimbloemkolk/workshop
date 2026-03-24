@@ -6,7 +6,7 @@
  * to the pipeline fetch task.
  */
 
-import type { GitLabJob, GraphQLResponse, JobMetadata } from '@gitlab-analysis/gitlab-api';
+import type { GitLabJob, GraphQLResponse, JobMetadata } from '@workshop/gitlab-api';
 import type { GitLabPipelineFull } from './types.js';
 
 /**

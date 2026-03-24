@@ -1,5 +1,5 @@
 /**
- * @gitlab-analysis/fetcher-core
+ * @workshop/fetcher-core
  * 
  * Generic fetch orchestration framework with Ink TUI.
  */

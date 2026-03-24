@@ -1,5 +1,5 @@
 /**
- * @gitlab-analysis/gitlab-api
+ * @workshop/gitlab-api
  * 
  * GitLab API client with transport abstraction and endpoint-based caching.
  */
@@ -23,7 +23,7 @@ export {
   type CacheKeyHasher,
   type CacheEntry,
   type CacheOptions,
-} from '@gitlab-analysis/fetcher-core';
+} from '@workshop/fetcher-core';
 
 // API functions
 export {
@@ -59,4 +59,4 @@ export {
   ApiMetricsTracker,
   type ApiCallMetrics,
   type ApiMetricsSummary,
-} from '@gitlab-analysis/fetcher-core';
+} from '@workshop/fetcher-core';

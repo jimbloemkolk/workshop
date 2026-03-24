@@ -1,4 +1,4 @@
-# @gitlab-analysis/transform
+# @workshop/transform
 
 Transform and analyze GitLab pipeline data with dependency calculation.
 
@@ -41,7 +41,7 @@ npm run transform -- job -f packages/app/public/data/pipelines.json -i 23904 -j 
 ## API Usage
 
 ```typescript
-import { calculateDependencies } from '@gitlab-analysis/transform';
+import { calculateDependencies } from '@workshop/transform';
 
 const result = calculateDependencies(pipeline);
 

@@ -1,5 +1,5 @@
 /**
- * @gitlab-analysis/fetch-pipelines
+ * @workshop/fetch-pipelines
  * 
  * Pipeline data fetching — entry point package.
  */

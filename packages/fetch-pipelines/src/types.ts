@@ -7,7 +7,7 @@ import type {
   GitLabJob,
   TriggerJob,
   JobMetadata,
-} from '@gitlab-analysis/gitlab-api';
+} from '@workshop/gitlab-api';
 
 /**
  * A fully-fetched pipeline with jobs, child pipelines, and enriched metadata.

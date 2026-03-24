@@ -1,11 +1,9 @@
 {
-  "name": "gitlab-analysis",
+  "name": "workshop",
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "workspaces": [
-    "packages/*"
-  ],
+  "packageManager": "pnpm@10.11.0",
   "scripts": {
     "dev": "cd packages/app && vite",
     "build": "cd packages/app && tsc -b && vite build",

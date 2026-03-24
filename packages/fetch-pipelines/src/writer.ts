@@ -7,7 +7,7 @@
 
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import type { Writer, WriteOptions } from '@gitlab-analysis/fetcher-core';
+import type { Writer, WriteOptions } from '@workshop/fetcher-core';
 import type { PipelineFetchResult } from './types.js';
 
 /**

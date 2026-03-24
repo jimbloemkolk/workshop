@@ -19,8 +19,8 @@
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { GlabTransport, ApiCache, getGitlabHostname, sanitizeHostname } from '@gitlab-analysis/gitlab-api';
-import { runFetchTask } from '@gitlab-analysis/fetcher-core';
+import { GlabTransport, ApiCache, getGitlabHostname, sanitizeHostname } from '@workshop/gitlab-api';
+import { runFetchTask } from '@workshop/fetcher-core';
 
 import { PipelineFetchTask } from './src/task.js';
 import { PipelineWriter } from './src/writer.js';

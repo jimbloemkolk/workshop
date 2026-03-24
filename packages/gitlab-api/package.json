@@ -1,12 +1,12 @@
 {
-  "name": "@gitlab-analysis/gitlab-api",
+  "name": "@workshop/gitlab-api",
   "version": "1.0.0",
   "type": "module",
   "description": "GitLab API client with transport abstraction and endpoint-based caching",
   "main": "src/index.ts",
   "scripts": {},
   "dependencies": {
-    "@gitlab-analysis/fetcher-core": "*"
+    "@workshop/fetcher-core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.6.0",

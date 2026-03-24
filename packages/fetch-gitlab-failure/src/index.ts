@@ -1,5 +1,5 @@
 /**
- * @gitlab-analysis/fetch-gitlab-failure
+ * @workshop/fetch-gitlab-failure
  *
  * GitLab failure analysis — fetches failed pipelines, downloads job logs,
  * parses failure reasons, and produces structured JSON for analysis.

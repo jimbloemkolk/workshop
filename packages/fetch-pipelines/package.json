@@ -1,5 +1,5 @@
 {
-  "name": "@gitlab-analysis/fetch-pipelines",
+  "name": "@workshop/fetch-pipelines",
   "version": "1.0.0",
   "type": "module",
   "description": "Fetch GitLab pipeline data — entry point using shared fetcher framework",
@@ -8,8 +8,8 @@
     "fetch": "tsx fetch-pipelines.ts"
   },
   "dependencies": {
-    "@gitlab-analysis/gitlab-api": "*",
-    "@gitlab-analysis/fetcher-core": "*",
+    "@workshop/gitlab-api": "workspace:*",
+    "@workshop/fetcher-core": "workspace:*",
     "ink": "^6.5.1"
   },
   "devDependencies": {

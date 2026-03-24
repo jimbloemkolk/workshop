@@ -5,14 +5,14 @@
  * task: no list fetching, no merging with existing data, no batching.
  */
 
-import type { Transport, ApiCache, GitLabJob } from '@gitlab-analysis/gitlab-api';
+import type { Transport, ApiCache, GitLabJob } from '@workshop/gitlab-api';
 import {
   fetchPipelineBasic,
   fetchPipelineJobs,
   fetchDownstreamPipelines,
   fetchJobDependenciesGraphQL,
-} from '@gitlab-analysis/gitlab-api';
-import type { FetchTask, TaskContext } from '@gitlab-analysis/fetcher-core';
+} from '@workshop/gitlab-api';
+import type { FetchTask, TaskContext } from '@workshop/fetcher-core';
 import type { GitLabPipelineFull, PipelineFetchResult } from './types.js';
 import { parseJobDependenciesFromGraphQL, enrichJobsWithMetadata } from './transformer.js';
 

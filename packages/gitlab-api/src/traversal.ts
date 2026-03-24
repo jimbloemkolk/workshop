@@ -7,7 +7,7 @@
  */
 
 import type { Transport } from './transport.js';
-import type { ApiCache } from '@gitlab-analysis/fetcher-core';
+import type { ApiCache } from '@workshop/fetcher-core';
 import type { GitLabPipelineBasic, GitLabJob } from './types.js';
 import {
   fetchPipelineJobs,

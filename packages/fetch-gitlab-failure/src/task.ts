@@ -6,15 +6,15 @@
  * parses failure reasons via regex patterns.
  */
 
-import type { Transport, ApiCache } from '@gitlab-analysis/gitlab-api';
+import type { Transport, ApiCache } from '@workshop/gitlab-api';
 import {
   fetchPipelineList,
   fetchJobLog,
   collectJobsFromPipelineTree,
   apiMetrics,
-} from '@gitlab-analysis/gitlab-api';
-import type { JobWithPipelineContext } from '@gitlab-analysis/gitlab-api';
-import type { FetchTask, TaskContext } from '@gitlab-analysis/fetcher-core';
+} from '@workshop/gitlab-api';
+import type { JobWithPipelineContext } from '@workshop/gitlab-api';
+import type { FetchTask, TaskContext } from '@workshop/fetcher-core';
 import type { FailureFetchResult, FailedJobInfo } from './types.js';
 import { parseFailureReasons, extractLogExcerpt } from './logParser.js';
 

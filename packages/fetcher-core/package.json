@@ -1,5 +1,5 @@
 {
-  "name": "@gitlab-analysis/fetcher-core",
+  "name": "@workshop/fetcher-core",
   "version": "1.0.0",
   "type": "module",
   "description": "Generic fetch orchestration framework with Ink TUI",

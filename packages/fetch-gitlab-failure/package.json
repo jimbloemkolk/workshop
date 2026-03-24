@@ -1,5 +1,5 @@
 {
-  "name": "@gitlab-analysis/fetch-gitlab-failure",
+  "name": "@workshop/fetch-gitlab-failure",
   "version": "1.0.0",
   "type": "module",
   "description": "Fetch GitLab pipeline failure data — finds failed pipelines, downloads job logs, parses failure reasons",
@@ -8,8 +8,8 @@
     "fetch": "tsx fetch-gitlab-failure.ts"
   },
   "dependencies": {
-    "@gitlab-analysis/gitlab-api": "*",
-    "@gitlab-analysis/fetcher-core": "*",
+    "@workshop/gitlab-api": "workspace:*",
+    "@workshop/fetcher-core": "workspace:*",
     "ink": "^6.5.1"
   },
   "devDependencies": {

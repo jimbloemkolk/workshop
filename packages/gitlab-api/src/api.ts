@@ -12,14 +12,14 @@
  */
 
 import type { Transport } from './transport.js';
-import type { ApiCache, CacheKey } from '@gitlab-analysis/fetcher-core';
-import { restCacheKey, graphqlCacheKey } from '@gitlab-analysis/fetcher-core';
+import type { ApiCache, CacheKey } from '@workshop/fetcher-core';
+import { restCacheKey, graphqlCacheKey } from '@workshop/fetcher-core';
 import type {
   GitLabPipelineBasic,
   GitLabJob,
   GraphQLResponse,
 } from './types.js';
-import { apiMetrics } from '@gitlab-analysis/fetcher-core';
+import { apiMetrics } from '@workshop/fetcher-core';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

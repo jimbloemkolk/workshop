@@ -11,7 +11,7 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import type { Transport, GitLabPipelineBasic, GitLabJob, ApiCache } from '@gitlab-analysis/gitlab-api';
+import type { Transport, GitLabPipelineBasic, GitLabJob, ApiCache } from '@workshop/gitlab-api';
 import {
   fetchPipelineList,
   fetchPipelineBasic,
@@ -19,8 +19,8 @@ import {
   fetchDownstreamPipelines,
   fetchJobDependenciesGraphQL,
   apiMetrics,
-} from '@gitlab-analysis/gitlab-api';
-import type { FetchTask, TaskContext } from '@gitlab-analysis/fetcher-core';
+} from '@workshop/gitlab-api';
+import type { FetchTask, TaskContext } from '@workshop/fetcher-core';
 import type {
   GitLabPipelineFull,
   PipelineFetchResult,
