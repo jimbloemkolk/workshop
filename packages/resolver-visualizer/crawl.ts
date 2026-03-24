@@ -19,6 +19,7 @@ const resolveAsync = (request: string, opts: any): Promise<string> => {
 const args = process.argv.slice(2);
 const MISMATCHES_ONLY = args.includes('--mismatches-only');
 const VERBOSE = args.includes('--verbose');
+const PRESERVE_SYMLINKS = !args.includes('--real-paths');
 
 // Resolve mode: runtime | typecheck | both (default: both)
 let RESOLVE_MODE: 'runtime' | 'typecheck' | 'both' = 'both';
@@ -34,7 +35,7 @@ if (resolveArg) {
 if (args.includes('--runtime-only')) RESOLVE_MODE = 'runtime';
 if (args.includes('--typecheck-only')) RESOLVE_MODE = 'typecheck';
 
-const filteredArgs = args.filter(arg => arg !== '--mismatches-only' && arg !== '--verbose' && !arg.startsWith('--resolve=') && arg !== '--runtime-only' && arg !== '--typecheck-only');
+const filteredArgs = args.filter(arg => arg !== '--mismatches-only' && arg !== '--verbose' && arg !== '--real-paths' && !arg.startsWith('--resolve=') && arg !== '--runtime-only' && arg !== '--typecheck-only');
 const ENTRY_FILE = filteredArgs[0];
 const FILTER_PATTERN = filteredArgs[1];
 
@@ -152,7 +153,7 @@ const parsedConfig = ts.parseJsonConfigFileContent(
 );
 
 // Force strict options for pnpm analysis
-parsedConfig.options.preserveSymlinks = false;
+parsedConfig.options.preserveSymlinks = PRESERVE_SYMLINKS;
 // Performance optimizations
 parsedConfig.options.skipLibCheck = true;
 parsedConfig.options.skipDefaultLibCheck = true;
@@ -175,7 +176,7 @@ const moduleResolutionHost: ts.ModuleResolutionHost = {
     directoryExists: ts.sys.directoryExists,
     getCurrentDirectory: () => process.cwd(),
     getDirectories: ts.sys.getDirectories,
-    realpath: ts.sys.realpath,
+    realpath: PRESERVE_SYMLINKS ? undefined : ts.sys.realpath,
 };
 
 // --- 3. HELPER: VITE ROOT RESOLVER ---
@@ -298,7 +299,7 @@ async function crawl(filePath: string, depth = 0, prefix = ''): Promise<any[]> {
                         runtimePath = await resolveAsync(req.text, {
                             basedir: baseDir,
                             extensions: ['.js', '.ts', '.tsx', '.json', '.svg', '.css', '.mjs'],
-                            preserveSymlinks: false
+                            preserveSymlinks: PRESERVE_SYMLINKS
                         });
                         jsResolveTime += performance.now() - jsStart;
                     } catch (e) {}
