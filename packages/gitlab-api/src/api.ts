@@ -21,6 +21,39 @@ import type {
 } from './types.js';
 import { apiMetrics } from '@gitlab-analysis/fetcher-core';
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Parse JSON with better error messages for HTML responses.
+ * Extracts title or H1 from HTML to provide context.
+ */
+function safeJsonParse<T>(text: string, context: string): T {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    // Check if response is HTML (common when VPN/auth issues occur)
+    if (text.trim().startsWith('<')) {
+      // Try to extract title or H1 for a better error message
+      const titleMatch = text.match(/<title>([^<]+)<\/title>/i);
+      const h1Match = text.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+      const message = titleMatch?.[1] || h1Match?.[1] || 'HTML page';
+      
+      throw new Error(
+        `GitLab API returned HTML instead of JSON (${context}).\n` +
+        `Page title: "${message.trim()}"\n` +
+        `This usually means:\n` +
+        `  • VPN connection required\n` +
+        `  • Authentication failed (check: glab auth status)\n` +
+        `  • Invalid GitLab URL\n` +
+        `Preview: ${text.slice(0, 150)}...`
+      );
+    }
+    throw error;
+  }
+}
+
+// ─── API Options ─────────────────────────────────────────────────────────────
+
 export interface ApiCallOptions {
   /** 
    * Predicate to decide if this response should be cached.
@@ -56,7 +89,7 @@ export async function fetchPipelineList(
     const duration = Date.now() - startTime;
     apiMetrics.recordCall('pipeline-list', duration);
 
-    const pipelines: GitLabPipelineBasic[] = JSON.parse(stdout);
+    const pipelines: GitLabPipelineBasic[] = safeJsonParse(stdout, `fetching pipeline list for ${projectPath}`);
 
     if (options?.shouldCache?.(pipelines)) {
       cache.set(key, pipelines);
@@ -99,7 +132,7 @@ export async function fetchPipelineBasic(
   const duration = Date.now() - startTime;
   apiMetrics.recordCall('pipeline-basic', duration);
 
-  const data: GitLabPipelineBasic = JSON.parse(stdout);
+  const data: GitLabPipelineBasic = safeJsonParse(stdout, `fetching pipeline #${pipelineId}`);
 
   if (options?.shouldCache?.(data)) {
     cache.set(key, data, { pipelineStatus: data.status });
@@ -132,7 +165,7 @@ export async function fetchPipelineJobs(
   const duration = Date.now() - startTime;
   apiMetrics.recordCall('pipeline-jobs', duration);
 
-  const jobs: GitLabJob[] = JSON.parse(stdout);
+  const jobs: GitLabJob[] = safeJsonParse(stdout, `fetching jobs for pipeline #${pipelineId}`);
 
   if (jobs.length >= 100) {
     throw new Error(
@@ -172,7 +205,7 @@ export async function fetchDownstreamPipelines(
     const duration = Date.now() - startTime;
     apiMetrics.recordCall('bridges', duration);
 
-    const bridges = JSON.parse(stdout);
+    const bridges = safeJsonParse<any[]>(stdout, `fetching bridges for pipeline #${pipelineId}`);
 
     const result = bridges
       .filter((bridge: any) => bridge.downstream_pipeline)
@@ -350,7 +383,7 @@ export async function fetchJobDependenciesGraphQL(
     const duration = Date.now() - startTime;
     apiMetrics.recordCall('graphql', duration);
 
-    const data: GraphQLResponse = JSON.parse(stdout);
+    const data: GraphQLResponse = safeJsonParse(stdout, 'GraphQL query');
 
     if (options?.shouldCache?.(data)) {
       cache.set(key, data);
