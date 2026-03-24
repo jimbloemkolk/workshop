@@ -16,6 +16,7 @@
     "transform": "tsx packages/gitlab/transform/src/cli.ts",
     "discover-datasets": "tsx packages/gitlab/app/scripts/discover-datasets.ts",
     "crawl": "tsx packages/resolver-visualizer/crawl.ts",
+    "coverage": "tsx packages/coverage-merger/merge-coverage.ts",
     "check": "pnpm -r run check"
   },
   "devDependencies": {
