@@ -1,6 +1,5 @@
 import React from 'react';
-import type { AggregatedJobAnalysis } from '../../../../packages/transform/src/index';
-import { calculateAggregatedSummary } from '../../../../packages/transform/src/index';
+import { type AggregatedJobAnalysis, calculateAggregatedSummary } from '@workshop/transform';
 import './PipelineStats.css';
 
 interface PipelineStatsProps {

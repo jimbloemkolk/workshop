@@ -10,7 +10,7 @@ import {
   countPipelinesByType,
   aggregateJobImpactAnalysis,
   type AggregatedJobAnalysis
-} from '../../../packages/transform/src/index';
+} from '@workshop/transform';
 import PipelineTimeline from './components/PipelineTimelineSVG';
 import JobDetail from './components/JobDetail';
 import CriticalPathAnalysis from './components/CriticalPathAnalysis';
