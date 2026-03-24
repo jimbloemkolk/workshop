@@ -4,12 +4,16 @@
   "type": "module",
   "description": "Generic fetch orchestration framework with Ink TUI",
   "main": "src/index.ts",
-  "scripts": {},
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
   "dependencies": {
+    "react": "^19.1.1",
     "ink": "^6.5.1",
     "ink-spinner": "^5.0.0"
   },
   "devDependencies": {
+    "@types/react": "^19.1.16",
     "@types/node": "^24.6.0",
     "typescript": "~5.9.3"
   }

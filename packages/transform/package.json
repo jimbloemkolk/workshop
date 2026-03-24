@@ -7,7 +7,8 @@
     "transform-debug": "./src/cli.ts"
   },
   "scripts": {
-    "debug": "tsx src/cli.ts"
+    "debug": "tsx src/cli.ts",
+    "check": "tsc --noEmit"
   },
   "dependencies": {
     "commander": "^12.1.0",

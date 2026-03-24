@@ -4,7 +4,9 @@
   "type": "module",
   "description": "GitLab API client with transport abstraction and endpoint-based caching",
   "main": "src/index.ts",
-  "scripts": {},
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
   "dependencies": {
     "@workshop/fetcher-core": "workspace:*"
   },

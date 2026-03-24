@@ -5,7 +5,8 @@
   "description": "Fetch GitLab pipeline failure data — finds failed pipelines, downloads job logs, parses failure reasons",
   "main": "src/index.ts",
   "scripts": {
-    "fetch": "tsx fetch-gitlab-failure.ts"
+    "fetch": "tsx fetch-gitlab-failure.ts",
+    "check": "tsc --noEmit"
   },
   "dependencies": {
     "@workshop/gitlab-api": "workspace:*",

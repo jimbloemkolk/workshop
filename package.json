@@ -14,7 +14,8 @@
     "fetch:failures": "tsx packages/fetch-gitlab-failure/fetch-gitlab-failure.ts",
     "failures:csv": "tsx packages/fetch-gitlab-failure/scripts/generate-csvs.ts",
     "transform": "tsx packages/transform/src/cli.ts",
-    "discover-datasets": "tsx packages/app/scripts/discover-datasets.ts"
+    "discover-datasets": "tsx packages/app/scripts/discover-datasets.ts",
+    "check": "pnpm -r run check"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
