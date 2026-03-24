@@ -402,7 +402,7 @@ async function crawl(filePath: string, depth = 0, prefix = ''): Promise<any[]> {
         typesPkg = typesPath ? findPackageJson(typesPath) : undefined
 
         // F. IMPROVED MISMATCH DETECTION
-        let isMismatch = false;
+        let isMismatch: boolean | 'unknown' = false;
         // Only consider mismatches when both resolutions were requested/performed
         const performedRuntime = RESOLVE_MODE !== 'typecheck';
         const performedTypes = RESOLVE_MODE !== 'runtime';
@@ -445,12 +445,7 @@ async function crawl(filePath: string, depth = 0, prefix = ''): Promise<any[]> {
                     }
                 }
             } else {
-                // Fallback to name-based comparison
-                const runName = path.parse(runtimePath).name;
-                const typeName = path.parse(typesPath).name;
-                if (runName !== typeName) {
-                    isMismatch = true;
-                }
+                isMismatch = 'unknown';
             }
         }
 
@@ -580,7 +575,7 @@ function matchesFilter(request: string, runtimePkg?: PackageInfo, typesPkg?: Pac
 // Check if this node or any of its descendants have mismatches
 function hasMismatchInTree(node: any): boolean {
     const edge = node.edge;
-    if (edge && edge.isMismatch) return true;
+    if (edge && edge.isMismatch === true) return true;
     
     if (node.children && node.children.length > 0) {
         for (const child of node.children) {
@@ -620,7 +615,7 @@ function printTree(node: any, depth = 0, isLast = true, prefix = '', ancestorMis
     
     // Apply mismatch-only filter first
     if (MISMATCHES_ONLY) {
-        shouldShow = edge.isMismatch || hasMismatchInTree(node);
+        shouldShow = edge.isMismatch === true || hasMismatchInTree(node);
     }
     
     // Then apply pattern filter if specified
@@ -645,8 +640,10 @@ function printTree(node: any, depth = 0, isLast = true, prefix = '', ancestorMis
     // Check if the source file is a type-only file (e.g., .d.ts)
     const sourceIsTypeOnly = edge.source && edge.source.endsWith('.d.ts');
 
-    if (edge.isMismatch) {
+    if (edge.isMismatch === true) {
         status = '⚠️';
+    } else if (edge.isMismatch === 'unknown') {
+        status = '?';
     } else if (performedRuntime && performedTypes) {
         // both mode: check based on source file type
         if (sourceIsTypeOnly) {
@@ -687,7 +684,7 @@ function printTree(node: any, depth = 0, isLast = true, prefix = '', ancestorMis
     // print on a single line: `✅ "react" path (pkg@ver)`
     const onlyTypes = (RESOLVE_MODE !== 'runtime') && !!edge.typesPath && !(RESOLVE_MODE !== 'typecheck' && edge.runtimePath);
     const onlyRuntime = (RESOLVE_MODE !== 'typecheck') && !!edge.runtimePath && !(RESOLVE_MODE !== 'runtime' && edge.typesPath);
-    const hasNotes = edge.isMismatch || (performedTypes && performedRuntime && edge.runtimePath && edge.kind === 'import' && !edge.typesPath && !assetExt);
+    const hasNotes = edge.isMismatch === true || (performedTypes && performedRuntime && edge.runtimePath && edge.kind === 'import' && !edge.typesPath && !assetExt);
 
     if ((onlyTypes || onlyRuntime) && !hasNotes) {
         const singlePath = onlyTypes ? edge.typesPath : edge.runtimePath;
@@ -718,7 +715,7 @@ function printTree(node: any, depth = 0, isLast = true, prefix = '', ancestorMis
         console.log(`${prefix}${childPrefix}   ⚠️  No type resolution found for import`);
     }
 
-    if (edge.isMismatch) {
+    if (edge.isMismatch === true) {
         console.log(`${prefix}${childPrefix}   🚨 Mismatch detected!`);
     }
     
