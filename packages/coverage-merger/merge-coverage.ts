@@ -12,6 +12,7 @@
  * Options:
  *   --command <cmd>      Test command to run (default: "pnpm -r test --coverage")
  *   --output-dir <dir>   Where to write the merged report (default: ./coverage-merged)
+ *   --types <t1,t2,...>  Coverage directory names to collect (default: "coverage")
  *   --skip-run           Skip running the test command; merge existing reports only
  *   --no-view            Skip opening the HTML report after merging
  *   --root <dir>         Monorepo root to scan (default: cwd / INIT_CWD)
@@ -32,6 +33,7 @@ const istanbulReports = require('istanbul-reports') as typeof import('istanbul-r
 interface CliOptions {
   command: string;
   outputDir: string;
+  types: string[];
   skipRun: boolean;
   noView: boolean;
   root: string;
@@ -43,6 +45,7 @@ function parseArgs(): CliOptions {
 
   let command = 'pnpm -r test --coverage';
   let outputDir = 'coverage-merged';
+  let types = ['coverage'];
   let skipRun = false;
   let noView = false;
   let root = process.env.INIT_CWD ?? process.cwd();
@@ -55,6 +58,9 @@ function parseArgs(): CliOptions {
         break;
       case '--output-dir':
         outputDir = args[++i] ?? outputDir;
+        break;
+      case '--types':
+        types = (args[++i] ?? 'coverage').split(',').map(t => t.trim()).filter(Boolean);
         break;
       case '--root':
         root = path.resolve(args[++i] ?? root);
@@ -80,7 +86,7 @@ function parseArgs(): CliOptions {
     outputDir = path.resolve(root, outputDir);
   }
 
-  return { command, outputDir, skipRun, noView, root, depth };
+  return { command, outputDir, types, skipRun, noView, root, depth };
 }
 
 function printHelp(): void {
@@ -90,6 +96,7 @@ Usage: tsx merge-coverage.ts [options]
 Options:
   --command <cmd>      Test command to run (default: "pnpm -r test --coverage")
   --output-dir <dir>   Where to write the merged report (default: ./coverage-merged)
+  --types <t1,t2,...>  Coverage directory names to collect (default: "coverage")
   --skip-run           Skip running the test command; merge existing reports only
   --no-view            Skip opening the HTML report after merging
   --root <dir>         Monorepo root to scan (default: cwd / INIT_CWD)
@@ -125,9 +132,9 @@ function runTestCommand(command: string, root: string): void {
 
 /**
  * Recursively walk `dir` up to `maxDepth`, collecting directories named
- * "coverage" that contain coverage-final.json.
+ * `typeName` that contain coverage-final.json.
  */
-function findCoverageDirs(root: string, dir: string, maxDepth: number, currentDepth = 0): FoundReport[] {
+function findCoverageDirs(root: string, dir: string, typeName: string, maxDepth: number, currentDepth = 0): FoundReport[] {
   if (currentDepth > maxDepth) return [];
 
   let entries: fs.Dirent[];
@@ -146,7 +153,7 @@ function findCoverageDirs(root: string, dir: string, maxDepth: number, currentDe
 
     const fullPath = path.join(dir, entry.name);
 
-    if (entry.name === 'coverage') {
+    if (entry.name === typeName) {
       const jsonPath = path.join(fullPath, 'coverage-final.json');
       if (fs.existsSync(jsonPath)) {
         results.push({
@@ -157,15 +164,15 @@ function findCoverageDirs(root: string, dir: string, maxDepth: number, currentDe
       continue;
     }
 
-    results.push(...findCoverageDirs(root, fullPath, maxDepth, currentDepth + 1));
+    results.push(...findCoverageDirs(root, fullPath, typeName, maxDepth, currentDepth + 1));
   }
 
   return results;
 }
 
-function printFoundReports(reports: FoundReport[], root: string): void {
+function printFoundReports(reports: FoundReport[], typeName: string, root: string): void {
   console.log(`\n${'─'.repeat(60)}`);
-  console.log(`Found ${reports.length} coverage report(s)`);
+  console.log(`[${typeName}] Found ${reports.length} coverage report(s)`);
   console.log(`${'─'.repeat(60)}`);
 
   if (reports.length === 0) {
@@ -229,31 +236,128 @@ function mergeReports(reports: FoundReport[], root: string, outputDir: string): 
   istanbulReports.create('lcovonly').execute(context);
 }
 
-// ─── Step 4: Print summary + open report ─────────────────────────────────────
+// ─── Step 4: Generate overview index ─────────────────────────────────────────
 
-function openReport(outputDir: string): void {
+interface TypeResult {
+  type: string;
+  dir: string;
+  count: number;
+}
+
+function generateOverviewPage(outputDir: string, results: TypeResult[]): string {
   const indexPath = path.join(outputDir, 'index.html');
 
+  const rows = results.map(r => {
+    const relDir = r.type === 'all' ? 'all' : r.type;
+    return `
+      <tr>
+        <td><a href="${relDir}/index.html">${r.type}</a></td>
+        <td>${r.count} package${r.count !== 1 ? 's' : ''}</td>
+        <td><a href="${relDir}/index.html">Open report →</a></td>
+      </tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Coverage Reports</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 2rem 2.5rem;
+      min-width: 480px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }
+    .subtitle { color: #94a3b8; font-size: 0.875rem; margin-bottom: 2rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      text-align: left;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748b;
+      padding: 0 0.75rem 0.75rem;
+    }
+    td {
+      padding: 0.75rem;
+      border-top: 1px solid #334155;
+      font-size: 0.9rem;
+    }
+    td:first-child { font-weight: 600; color: #f1f5f9; }
+    td:nth-child(2) { color: #94a3b8; }
+    a { color: #38bdf8; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    tr:last-child td { border-bottom: 1px solid #334155; }
+    .all-row td { background: #1a2d3a; }
+    .all-row td:first-child { color: #7dd3fc; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Coverage Reports</h1>
+    <p class="subtitle">Select a report to view</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Packages</th>
+          <th>Report</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>`;
+
+  fs.writeFileSync(indexPath, html, 'utf-8');
+  return indexPath;
+}
+
+// ─── Step 5: Print summary + open report ─────────────────────────────────────
+
+function openReport(htmlPath: string): void {
   console.log(`\n${'─'.repeat(60)}`);
   console.log('Report ready');
   console.log(`${'─'.repeat(60)}`);
-  console.log(`  Open: ${indexPath}`);
+  console.log(`  Open: ${htmlPath}`);
 
   const opener =
     process.platform === 'darwin' ? 'open' :
     process.platform === 'win32'  ? 'start' : 'xdg-open';
 
-  spawnSync(`${opener} "${indexPath}"`, { shell: true, stdio: 'inherit' });
+  spawnSync(`${opener} "${htmlPath}"`, { shell: true, stdio: 'inherit' });
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 function main(): void {
   const opts = parseArgs();
+  const multiType = opts.types.length > 1;
 
   console.log('Coverage Merger');
   console.log(`Root    : ${opts.root}`);
   console.log(`Output  : ${opts.outputDir}`);
+  console.log(`Types   : ${opts.types.join(', ')}`);
   if (!opts.skipRun) console.log(`Command : ${opts.command}`);
 
   // Step 1: run tests
@@ -263,30 +367,64 @@ function main(): void {
     console.log('\nSkipping test run (--skip-run).');
   }
 
-  // Step 2: find reports
-  const foundReports = findCoverageDirs(opts.root, opts.root, opts.depth);
-  printFoundReports(foundReports, opts.root);
+  fs.mkdirSync(opts.outputDir, { recursive: true });
 
-  if (foundReports.length === 0) {
+  const typeResults: TypeResult[] = [];
+  const allReports: FoundReport[] = [];
+
+  // Step 2+3: find and merge per type
+  for (const typeName of opts.types) {
+    const foundReports = findCoverageDirs(opts.root, opts.root, typeName, opts.depth);
+    printFoundReports(foundReports, typeName, opts.root);
+
+    if (foundReports.length === 0) continue;
+
+    allReports.push(...foundReports);
+
+    const typeOutputDir = multiType ? path.join(opts.outputDir, typeName) : opts.outputDir;
+    fs.mkdirSync(typeOutputDir, { recursive: true });
+
+    console.log(`\nMerging [${typeName}] ${foundReports.length} report(s) into ${path.relative(opts.root, typeOutputDir)}/…`);
+    mergeReports(foundReports, opts.root, typeOutputDir);
+
+    const htmlRel = path.relative(opts.root, path.join(typeOutputDir, 'index.html'));
+    const lcovRel = path.relative(opts.root, path.join(typeOutputDir, 'lcov.info'));
+    const jsonRel = path.relative(opts.root, path.join(typeOutputDir, 'coverage-final.json'));
+    console.log(`  html : ${htmlRel}`);
+    console.log(`  lcov : ${lcovRel}`);
+    console.log(`  json : ${jsonRel}`);
+
+    typeResults.push({ type: typeName, dir: typeOutputDir, count: foundReports.length });
+  }
+
+  if (allReports.length === 0) {
     console.log('\nNothing to merge. Exiting.\n');
     process.exit(0);
   }
 
-  // Step 3: merge + generate reports
-  fs.mkdirSync(opts.outputDir, { recursive: true });
-  console.log(`\nMerging ${foundReports.length} report(s) into ${path.relative(opts.root, opts.outputDir)}/…`);
-  mergeReports(foundReports, opts.root, opts.outputDir);
+  // Step 3b: unified report + overview page (multi-type only)
+  let openPath: string;
 
-  const lcovPath = path.join(opts.outputDir, 'lcov.info');
-  const lcovRel = path.relative(opts.root, lcovPath);
-  const htmlRel = path.relative(opts.root, path.join(opts.outputDir, 'index.html'));
-  console.log(`  html   : ${htmlRel}`);
-  console.log(`  lcov   : ${lcovRel}`);
-  console.log(`  json   : ${path.relative(opts.root, path.join(opts.outputDir, 'coverage-final.json'))}`);
+  if (multiType) {
+    const allOutputDir = path.join(opts.outputDir, 'all');
+    fs.mkdirSync(allOutputDir, { recursive: true });
+
+    console.log(`\nMerging [all] ${allReports.length} report(s) into ${path.relative(opts.root, allOutputDir)}/…`);
+    mergeReports(allReports, opts.root, allOutputDir);
+    console.log(`  html : ${path.relative(opts.root, path.join(allOutputDir, 'index.html'))}`);
+    console.log(`  lcov : ${path.relative(opts.root, path.join(allOutputDir, 'lcov.info'))}`);
+
+    typeResults.push({ type: 'all', dir: allOutputDir, count: allReports.length });
+
+    openPath = generateOverviewPage(opts.outputDir, typeResults);
+    console.log(`\nOverview: ${path.relative(opts.root, openPath)}`);
+  } else {
+    openPath = path.join(opts.outputDir, 'index.html');
+  }
 
   // Step 4: open
   if (!opts.noView) {
-    openReport(opts.outputDir);
+    openReport(openPath);
   }
 }
 
