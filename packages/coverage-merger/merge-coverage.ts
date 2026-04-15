@@ -36,6 +36,7 @@ interface CliOptions {
   types: string[];
   skipRun: boolean;
   noView: boolean;
+  htmlOnly: boolean;
   root: string;
   depth: number;
 }
@@ -48,6 +49,7 @@ function parseArgs(): CliOptions {
   let types = ['coverage'];
   let skipRun = false;
   let noView = false;
+  let htmlOnly = false;
   let root = process.env.INIT_CWD ?? process.cwd();
   let depth = 5;
 
@@ -75,6 +77,9 @@ function parseArgs(): CliOptions {
       case '--noview':
         noView = true;
         break;
+      case '--html-only':
+        htmlOnly = true;
+        break;
       case '--help':
       case '-h':
         printHelp();
@@ -86,7 +91,7 @@ function parseArgs(): CliOptions {
     outputDir = path.resolve(root, outputDir);
   }
 
-  return { command, outputDir, types, skipRun, noView, root, depth };
+  return { command, outputDir, types, skipRun, noView, htmlOnly, root, depth };
 }
 
 function printHelp(): void {
@@ -99,6 +104,7 @@ Options:
   --types <t1,t2,...>  Coverage directory names to collect (default: "coverage")
   --skip-run           Skip running the test command; merge existing reports only
   --no-view            Skip opening the HTML report after merging
+  --html-only          Only write HTML output; skip coverage-final.json and lcov.info
   --root <dir>         Monorepo root to scan (default: cwd / INIT_CWD)
   --depth <n>          Max depth to search for coverage dirs (default: 5)
   -h, --help           Show this help
@@ -110,6 +116,13 @@ Options:
 interface FoundReport {
   package: string;  // package path relative to root, e.g. "apps/web-app"
   json?: string;    // absolute path to coverage-final.json
+}
+
+interface OtherReport {
+  package: string;    // package path relative to root, e.g. "apps/web-app"
+  type: string;       // coverage directory name, e.g. "e2e"
+  htmlDir: string;    // absolute path to the directory containing index.html
+  outputDir?: string; // absolute path where it was copied in the output
 }
 
 // ─── Step 1: Run the test command ────────────────────────────────────────────
@@ -132,19 +145,27 @@ function runTestCommand(command: string, root: string): void {
 
 /**
  * Recursively walk `dir` up to `maxDepth`, collecting directories named
- * `typeName` that contain coverage-final.json.
+ * `typeName` that contain coverage-final.json (reports) or only index.html
+ * (otherReports — HTML-only coverage with no JSON to merge).
  */
-function findCoverageDirs(root: string, dir: string, typeName: string, maxDepth: number, currentDepth = 0): FoundReport[] {
-  if (currentDepth > maxDepth) return [];
+function findCoverageDirs(
+  root: string,
+  dir: string,
+  typeName: string,
+  maxDepth: number,
+  currentDepth = 0,
+): { reports: FoundReport[]; otherReports: OtherReport[] } {
+  if (currentDepth > maxDepth) return { reports: [], otherReports: [] };
 
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
-    return [];
+    return { reports: [], otherReports: [] };
   }
 
-  const results: FoundReport[] = [];
+  const reports: FoundReport[] = [];
+  const otherReports: OtherReport[] = [];
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
@@ -156,33 +177,51 @@ function findCoverageDirs(root: string, dir: string, typeName: string, maxDepth:
     if (entry.name === typeName) {
       const jsonPath = path.join(fullPath, 'coverage-final.json');
       if (fs.existsSync(jsonPath)) {
-        results.push({
+        reports.push({
           package: path.relative(root, dir) || '.',
           json: jsonPath,
+        });
+      } else if (fs.existsSync(path.join(fullPath, 'index.html'))) {
+        otherReports.push({
+          package: path.relative(root, dir) || '.',
+          type: typeName,
+          htmlDir: fullPath,
         });
       }
       continue;
     }
 
-    results.push(...findCoverageDirs(root, fullPath, typeName, maxDepth, currentDepth + 1));
+    const sub = findCoverageDirs(root, fullPath, typeName, maxDepth, currentDepth + 1);
+    reports.push(...sub.reports);
+    otherReports.push(...sub.otherReports);
   }
 
-  return results;
+  return { reports, otherReports };
 }
 
-function printFoundReports(reports: FoundReport[], typeName: string, root: string): void {
+function printFoundReports(reports: FoundReport[], otherReports: OtherReport[], typeName: string, root: string): void {
   console.log(`\n${'─'.repeat(60)}`);
-  console.log(`[${typeName}] Found ${reports.length} coverage report(s)`);
+  console.log(`[${typeName}] Found ${reports.length} coverage report(s), ${otherReports.length} html-only report(s)`);
   console.log(`${'─'.repeat(60)}`);
 
-  if (reports.length === 0) {
+  if (reports.length === 0 && otherReports.length === 0) {
     console.log('  (none)');
     return;
   }
 
-  const maxLen = Math.max(...reports.map(r => r.package.length));
-  for (const r of reports) {
-    console.log(`  ${r.package.padEnd(maxLen)}  →  ${path.relative(root, r.json!)}`);
+  if (reports.length > 0) {
+    const maxLen = Math.max(...reports.map(r => r.package.length));
+    for (const r of reports) {
+      console.log(`  ${r.package.padEnd(maxLen)}  →  ${path.relative(root, r.json!)}`);
+    }
+  }
+
+  if (otherReports.length > 0) {
+    console.log('  [other — html only, no coverage-final.json]');
+    const maxLen = Math.max(...otherReports.map(r => r.package.length));
+    for (const r of otherReports) {
+      console.log(`  ${r.package.padEnd(maxLen)}  →  ${path.relative(root, path.join(r.htmlDir, 'index.html'))}`);
+    }
   }
 }
 
@@ -202,7 +241,7 @@ function rewritePaths(data: Record<string, any>, root: string): Record<string, a
   return result;
 }
 
-function mergeReports(reports: FoundReport[], root: string, outputDir: string): void {
+function mergeReports(reports: FoundReport[], root: string, outputDir: string, htmlOnly = false): void {
   const map = createCoverageMap({});
 
   for (const r of reports) {
@@ -219,24 +258,39 @@ function mergeReports(reports: FoundReport[], root: string, outputDir: string): 
     map.merge(rewritten);
   }
 
-  // Write merged coverage-final.json
-  fs.writeFileSync(
-    path.join(outputDir, 'coverage-final.json'),
-    JSON.stringify(map.toJSON(), null, 2),
-    'utf-8'
-  );
-
-  // Generate HTML report (primary output) and lcov (secondary)
   const context = createContext({
     dir: outputDir,
     coverageMap: map,
     sourceFinder: (filePath) => fs.readFileSync(path.resolve(root, filePath), 'utf-8'),
   });
+
   istanbulReports.create('html-spa').execute(context);
-  istanbulReports.create('lcovonly').execute(context);
+
+  if (!htmlOnly) {
+    fs.writeFileSync(
+      path.join(outputDir, 'coverage-final.json'),
+      JSON.stringify(map.toJSON(), null, 2),
+      'utf-8'
+    );
+    istanbulReports.create('lcovonly').execute(context);
+  }
 }
 
-// ─── Step 4: Generate overview index ─────────────────────────────────────────
+// ─── Step 4: Copy html-only reports ──────────────────────────────────────────
+
+/**
+ * Copy an HTML-only coverage report directory into the output under
+ * `other/<type>/<safe-package>/` and return the destination path.
+ */
+function copyOtherReport(report: OtherReport, outputDir: string): string {
+  const safePackage = report.package === '.' ? 'root' : report.package.replace(/[/\\]/g, '-');
+  const destDir = path.join(outputDir, 'other', report.type, safePackage);
+  fs.mkdirSync(destDir, { recursive: true });
+  fs.cpSync(report.htmlDir, destDir, { recursive: true });
+  return destDir;
+}
+
+// ─── Step 5: Generate overview index ─────────────────────────────────────────
 
 interface TypeResult {
   type: string;
@@ -244,18 +298,48 @@ interface TypeResult {
   count: number;
 }
 
-function generateOverviewPage(outputDir: string, results: TypeResult[]): string {
+function generateOverviewPage(outputDir: string, results: TypeResult[], otherReports: OtherReport[] = []): string {
   const indexPath = path.join(outputDir, 'index.html');
+  const generatedAt = new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
   const rows = results.map(r => {
     const relDir = r.type === 'all' ? 'all' : r.type;
+    const isAll = r.type === 'all';
     return `
-      <tr>
+      <tr${isAll ? ' class="all-row"' : ''}>
         <td><a href="${relDir}/index.html">${r.type}</a></td>
         <td>${r.count} package${r.count !== 1 ? 's' : ''}</td>
         <td><a href="${relDir}/index.html">Open report →</a></td>
       </tr>`;
   }).join('');
+
+  const otherRows = otherReports.map(r => {
+    const safePackage = r.package === '.' ? 'root' : r.package.replace(/[/\\]/g, '-');
+    const relHref = `other/${r.type}/${safePackage}/index.html`;
+    const label = r.package === '.' ? r.type : `${r.type} — ${r.package}`;
+    return `
+      <tr class="other-row">
+        <td>${label}</td>
+        <td>—</td>
+        <td><a href="${relHref}">Open report →</a></td>
+      </tr>`;
+  }).join('');
+
+  const otherSection = otherReports.length > 0 ? `
+    <h2 class="section-title">Other Coverage Reports</h2>
+    <p class="subtitle">HTML-only reports — not included in merged coverage</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type / Package</th>
+          <th></th>
+          <th>Report</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${otherRows}
+      </tbody>
+    </table>` : '';
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -284,8 +368,9 @@ function generateOverviewPage(outputDir: string, results: TypeResult[]): string 
       box-shadow: 0 4px 24px rgba(0,0,0,0.4);
     }
     h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }
+    h2.section-title { font-size: 1.1rem; font-weight: 600; margin-top: 2rem; margin-bottom: 0.25rem; }
     .subtitle { color: #94a3b8; font-size: 0.875rem; margin-bottom: 2rem; }
-    table { width: 100%; border-collapse: collapse; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 0.5rem; }
     th {
       text-align: left;
       font-size: 0.75rem;
@@ -307,12 +392,14 @@ function generateOverviewPage(outputDir: string, results: TypeResult[]): string 
     tr:last-child td { border-bottom: 1px solid #334155; }
     .all-row td { background: #1a2d3a; }
     .all-row td:first-child { color: #7dd3fc; }
+    .other-row td { background: #1e2a1e; }
+    .other-row td:first-child { color: #86efac; }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>Coverage Reports</h1>
-    <p class="subtitle">Select a report to view</p>
+    <p class="subtitle">Select a report to view &nbsp;·&nbsp; Generated ${generatedAt}</p>
     <table>
       <thead>
         <tr>
@@ -325,6 +412,7 @@ function generateOverviewPage(outputDir: string, results: TypeResult[]): string 
         ${rows}
       </tbody>
     </table>
+    ${otherSection}
   </div>
 </body>
 </html>`;
@@ -359,6 +447,7 @@ function main(): void {
   console.log(`Output  : ${opts.outputDir}`);
   console.log(`Types   : ${opts.types.join(', ')}`);
   if (!opts.skipRun) console.log(`Command : ${opts.command}`);
+  if (opts.htmlOnly) console.log(`Mode    : html-only (skipping coverage-final.json and lcov.info)`);
 
   // Step 1: run tests
   if (!opts.skipRun) {
@@ -367,15 +456,29 @@ function main(): void {
     console.log('\nSkipping test run (--skip-run).');
   }
 
+  if (fs.existsSync(opts.outputDir)) {
+    fs.rmSync(opts.outputDir, { recursive: true, force: true });
+    console.log(`\nRemoved old report: ${opts.outputDir}`);
+  }
   fs.mkdirSync(opts.outputDir, { recursive: true });
 
   const typeResults: TypeResult[] = [];
   const allReports: FoundReport[] = [];
+  const allOtherReports: OtherReport[] = [];
 
   // Step 2+3: find and merge per type
   for (const typeName of opts.types) {
-    const foundReports = findCoverageDirs(opts.root, opts.root, typeName, opts.depth);
-    printFoundReports(foundReports, typeName, opts.root);
+    const { reports: foundReports, otherReports: foundOtherReports } =
+      findCoverageDirs(opts.root, opts.root, typeName, opts.depth);
+    printFoundReports(foundReports, foundOtherReports, typeName, opts.root);
+
+    // Copy html-only reports to the output directory
+    for (const other of foundOtherReports) {
+      const destDir = copyOtherReport(other, opts.outputDir);
+      other.outputDir = destDir;
+      allOtherReports.push(other);
+      console.log(`  [other] copied ${path.relative(opts.root, other.htmlDir)} → ${path.relative(opts.root, destDir)}`);
+    }
 
     if (foundReports.length === 0) continue;
 
@@ -385,38 +488,43 @@ function main(): void {
     fs.mkdirSync(typeOutputDir, { recursive: true });
 
     console.log(`\nMerging [${typeName}] ${foundReports.length} report(s) into ${path.relative(opts.root, typeOutputDir)}/…`);
-    mergeReports(foundReports, opts.root, typeOutputDir);
+    mergeReports(foundReports, opts.root, typeOutputDir, opts.htmlOnly);
 
-    const htmlRel = path.relative(opts.root, path.join(typeOutputDir, 'index.html'));
-    const lcovRel = path.relative(opts.root, path.join(typeOutputDir, 'lcov.info'));
-    const jsonRel = path.relative(opts.root, path.join(typeOutputDir, 'coverage-final.json'));
-    console.log(`  html : ${htmlRel}`);
-    console.log(`  lcov : ${lcovRel}`);
-    console.log(`  json : ${jsonRel}`);
+    console.log(`  html : ${path.relative(opts.root, path.join(typeOutputDir, 'index.html'))}`);
+    if (!opts.htmlOnly) {
+      console.log(`  lcov : ${path.relative(opts.root, path.join(typeOutputDir, 'lcov.info'))}`);
+      console.log(`  json : ${path.relative(opts.root, path.join(typeOutputDir, 'coverage-final.json'))}`);
+    }
 
     typeResults.push({ type: typeName, dir: typeOutputDir, count: foundReports.length });
   }
 
-  if (allReports.length === 0) {
+  if (allReports.length === 0 && allOtherReports.length === 0) {
     console.log('\nNothing to merge. Exiting.\n');
     process.exit(0);
   }
 
-  // Step 3b: unified report + overview page (multi-type only)
+  // Step 3b: unified report + overview page (multi-type, or when other reports exist)
+  const needsOverview = multiType || allOtherReports.length > 0;
   let openPath: string;
 
-  if (multiType) {
+  if (multiType && allReports.length > 0) {
     const allOutputDir = path.join(opts.outputDir, 'all');
     fs.mkdirSync(allOutputDir, { recursive: true });
 
     console.log(`\nMerging [all] ${allReports.length} report(s) into ${path.relative(opts.root, allOutputDir)}/…`);
-    mergeReports(allReports, opts.root, allOutputDir);
+    mergeReports(allReports, opts.root, allOutputDir, opts.htmlOnly);
     console.log(`  html : ${path.relative(opts.root, path.join(allOutputDir, 'index.html'))}`);
-    console.log(`  lcov : ${path.relative(opts.root, path.join(allOutputDir, 'lcov.info'))}`);
+    if (!opts.htmlOnly) {
+      console.log(`  lcov : ${path.relative(opts.root, path.join(allOutputDir, 'lcov.info'))}`);
+    }
 
-    typeResults.push({ type: 'all', dir: allOutputDir, count: allReports.length });
+    const uniquePackageCount = new Set(allReports.map(r => r.package)).size;
+    typeResults.push({ type: 'all', dir: allOutputDir, count: uniquePackageCount });
+  }
 
-    openPath = generateOverviewPage(opts.outputDir, typeResults);
+  if (needsOverview) {
+    openPath = generateOverviewPage(opts.outputDir, typeResults, allOtherReports);
     console.log(`\nOverview: ${path.relative(opts.root, openPath)}`);
   } else {
     openPath = path.join(opts.outputDir, 'index.html');
