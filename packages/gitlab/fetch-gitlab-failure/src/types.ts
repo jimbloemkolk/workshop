@@ -68,6 +68,9 @@ export interface DailyJobStats {
   totalJobs: number;
   successfulJobs: number;
   failedJobs: number;
+  canceledJobs: number;
+  skippedJobs: number;
+  otherJobs: number; // any remaining statuses (manual, created, pending, running, etc.)
 }
 
 /** The complete result of a failure fetch run */

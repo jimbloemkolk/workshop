@@ -192,12 +192,12 @@ export class FailureFetchTask implements FetchTask<FailureFetchResult> {
     context.setDetail('Parsed Jobs', failedJobInfos.length);
     
     // ── Calculate daily statistics ─────────────────────────────────────────
-    const dailyStatsMap = new Map<string, { total: number; successful: number; failed: number }>();
-    
+    const dailyStatsMap = new Map<string, { total: number; successful: number; failed: number; canceled: number; skipped: number; other: number }>();
+
     for (const { job, pipeline } of allJobs) {
       const date = pipeline.created_at.slice(0, 10); // YYYY-MM-DD
       if (!dailyStatsMap.has(date)) {
-        dailyStatsMap.set(date, { total: 0, successful: 0, failed: 0 });
+        dailyStatsMap.set(date, { total: 0, successful: 0, failed: 0, canceled: 0, skipped: 0, other: 0 });
       }
       const stats = dailyStatsMap.get(date)!;
       stats.total++;
@@ -205,9 +205,15 @@ export class FailureFetchTask implements FetchTask<FailureFetchResult> {
         stats.successful++;
       } else if (job.status === 'failed') {
         stats.failed++;
+      } else if (job.status === 'canceled') {
+        stats.canceled++;
+      } else if (job.status === 'skipped') {
+        stats.skipped++;
+      } else {
+        stats.other++;
       }
     }
-    
+
     const dailyStats = [...dailyStatsMap.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([date, stats]) => ({
@@ -215,6 +221,9 @@ export class FailureFetchTask implements FetchTask<FailureFetchResult> {
         totalJobs: stats.total,
         successfulJobs: stats.successful,
         failedJobs: stats.failed,
+        canceledJobs: stats.canceled,
+        skippedJobs: stats.skipped,
+        otherJobs: stats.other,
       }));
 
     context.updatePhase('Complete');

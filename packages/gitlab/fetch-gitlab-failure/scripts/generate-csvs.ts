@@ -179,23 +179,34 @@ function generateCategoryOverTime(jobs: FailedJobInfo[], dailyStats: DailyJobSta
     }
   }
 
-  // Sort by date
-  const sortedDates = [...dayCounts.keys()].sort();
+  // Use all dates from dailyStats so zero-failure days still appear in the CSV
+  const allDates = [...new Set([
+    ...[...dayCounts.keys()],
+    ...dailyStats.map(s => s.date),
+  ])].sort();
 
   // Build header
-  const header = ['date', 'successful_jobs', 'total_jobs', ...ALL_CATEGORIES, ...sortedPatterns, 'failed_jobs_total'];
+  const header = ['date', 'successful_jobs', 'failed_jobs', 'canceled_jobs', 'skipped_jobs', 'other_jobs', 'total_jobs', ...ALL_CATEGORIES, ...sortedPatterns, 'failed_jobs_total'];
   const rows = [csvRow(header)];
 
-  for (const date of sortedDates) {
-    const c = dayCounts.get(date)!;
+  for (const date of allDates) {
+    const c = dayCounts.get(date);
     const stats = dailyStatsMap.get(date);
-    const categoryTotal = ALL_CATEGORIES.reduce((sum, cat) => sum + c.categories[cat], 0);
+    const emptyPatterns: Record<string, number> = {};
+    for (const p of sortedPatterns) emptyPatterns[p] = 0;
+    const categories = c?.categories ?? { system_failure: 0, script_failure: 0, user_failure: 0, internal_failure: 0, timeout: 0, infrastructure: 0, unknown: 0 };
+    const patterns = c?.patterns ?? emptyPatterns;
+    const categoryTotal = ALL_CATEGORIES.reduce((sum, cat) => sum + categories[cat], 0);
     const row = [
       date,
       stats?.successfulJobs ?? 0,
+      stats?.failedJobs ?? 0,
+      stats?.canceledJobs ?? 0,
+      stats?.skippedJobs ?? 0,
+      stats?.otherJobs ?? 0,
       stats?.totalJobs ?? 0,
-      ...ALL_CATEGORIES.map((cat) => c.categories[cat]),
-      ...sortedPatterns.map((p) => c.patterns[p] || 0),
+      ...ALL_CATEGORIES.map((cat) => categories[cat]),
+      ...sortedPatterns.map((p) => patterns[p] || 0),
       categoryTotal,
     ];
     rows.push(csvRow(row));
