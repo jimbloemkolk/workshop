@@ -1,0 +1,12 @@
+{
+  "name": "@workshop/transcriber",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local transcription spike for the Insight Harvester — Python/WhisperX under a pnpm-script interface",
+  "scripts": {
+    "setup": "bash scripts/setup.sh",
+    "doctor": "uv run transcriber doctor",
+    "transcribe": "uv run transcriber transcribe",
+    "check": "uv lock --check"
+  }
+}

@@ -1,0 +1,20 @@
+[project]
+name = "transcriber"
+version = "0.1.0"
+description = "Local transcription spike for the Insight Harvester (WhisperX test-drive)"
+readme = "README.md"
+authors = [
+    { name = "Jim Bloemkolk", email = "jimbloemkolk@gmail.com" }
+]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mlx-whisper==0.4.3",
+    "whisperx==3.8.6",
+]
+
+[project.scripts]
+transcriber = "transcriber.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.26,<0.12.0"]
+build-backend = "uv_build"

@@ -17,6 +17,9 @@
     "discover-datasets": "tsx packages/gitlab/app/scripts/discover-datasets.ts",
     "crawl": "tsx packages/resolver-visualizer/crawl.ts",
     "coverage": "tsx packages/coverage-merger/merge-coverage.ts",
+    "transcribe": "pnpm --filter @workshop/transcriber run transcribe",
+    "transcriber:setup": "pnpm --filter @workshop/transcriber run setup",
+    "transcriber:doctor": "pnpm --filter @workshop/transcriber run doctor",
     "check": "pnpm -r run check"
   },
   "devDependencies": {
