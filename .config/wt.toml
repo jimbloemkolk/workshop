@@ -1,0 +1,6 @@
+# worktrunk project hooks — https://github.com/ (wt hook --help)
+
+# Install dependencies whenever a new worktree is created (e.g. wt switch --create).
+# Runs blocking so node_modules is ready as soon as the switch completes. pnpm's
+# global content-addressable store makes this fast (mostly hardlinks).
+pre-start = "pnpm install --frozen-lockfile"
