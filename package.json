@@ -4,6 +4,19 @@
   "version": "0.0.0",
   "type": "module",
   "packageManager": "pnpm@10.11.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ],
+    "packageExtensions": {
+      "drizzle-kit": {
+        "dependencies": {
+          "drizzle-orm": "*"
+        }
+      }
+    }
+  },
   "scripts": {
     "dev": "cd packages/gitlab/app && vite",
     "build": "cd packages/gitlab/app && tsc -b && vite build",
@@ -17,6 +30,9 @@
     "discover-datasets": "tsx packages/gitlab/app/scripts/discover-datasets.ts",
     "crawl": "tsx packages/resolver-visualizer/crawl.ts",
     "coverage": "tsx packages/coverage-merger/merge-coverage.ts",
+    "harvester": "pnpm --parallel --filter './packages/harvester/*' run dev",
+    "harvester:doctor": "pnpm --filter @workshop/harvester-backend run doctor",
+    "harvester:e2e": "pnpm --filter @workshop/harvester-backend run e2e",
     "transcribe": "pnpm --filter @workshop/transcriber run transcribe",
     "transcriber:setup": "pnpm --filter @workshop/transcriber run setup",
     "transcriber:doctor": "pnpm --filter @workshop/transcriber run doctor",
