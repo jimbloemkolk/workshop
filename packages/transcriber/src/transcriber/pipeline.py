@@ -112,6 +112,14 @@ def run(opts: Options) -> dict:
             )
         from concurrent.futures import ThreadPoolExecutor
 
+        # transformers lazy-loads submodules on first attribute access, and
+        # that machinery is not thread-safe: the diarization worker (pyannote)
+        # and the alignment import below can touch it concurrently and die
+        # with "ImportError: cannot import name 'Wav2Vec2ForCTC'". Materialize
+        # the shared imports here, before any second thread exists.
+        import whisperx.diarize  # noqa: F401
+        from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor  # noqa: F401
+
         print(f"[2/4] diarization: {DIARIZATION_MODEL} ({torch_device}, "
               "in background, concurrent with asr)")
         executor = ThreadPoolExecutor(max_workers=1)
