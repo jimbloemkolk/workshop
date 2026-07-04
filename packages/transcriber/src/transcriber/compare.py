@@ -41,6 +41,23 @@ def normalize_token(text: str) -> str:
     return re.sub(r"[^\w%]", "", text.lower())
 
 
+def totals(meta: dict) -> tuple[float, float]:
+    """(total_s, work_s) for a run. Prefers the recorded true elapsed time
+    (stages overlap since diarization runs concurrently with ASR); falls back
+    to summing stages for result files that predate total_wall_clock_s.
+    work_s excludes the model loads on the critical path (diarize_load
+    overlaps ASR, so it never counts)."""
+    stages = meta["stages"]
+    total = meta.get("total_wall_clock_s")
+    if total is None:
+        return (
+            sum(s["wall_clock_s"] for s in stages.values()),
+            sum(s["wall_clock_s"] for n, s in stages.items() if not n.endswith("_load")),
+        )
+    loads = sum(stages[n]["wall_clock_s"] for n in ("asr_load", "align_load") if n in stages)
+    return total, total - loads
+
+
 def print_stage_table(results: dict[str, dict], pad: str = "  ",
                       extra_rows: list[tuple[str, list[str]]] | None = None) -> None:
     labels = list(results)
@@ -62,12 +79,10 @@ def print_stage_table(results: dict[str, dict], pad: str = "  ",
             if name in results[l]["meta"]["stages"] else "-"
             for l in labels
         ])
-    work = {l: sum(s["wall_clock_s"] for n, s in results[l]["meta"]["stages"].items()
-                   if not n.endswith("_load")) for l in labels}
-    row("total", [f"{sum(s['wall_clock_s'] for s in results[l]['meta']['stages'].values()):.1f}s"
-                  for l in labels])
+    perf = {l: totals(results[l]["meta"]) for l in labels}
+    row("total", [f"{perf[l][0]:.1f}s" for l in labels])
     row("speed (excl. load)", [
-        f"{results[l]['meta']['duration_s'] / work[l]:.1f}x realtime" if work[l] else "-"
+        f"{results[l]['meta']['duration_s'] / perf[l][1]:.1f}x realtime" if perf[l][1] else "-"
         for l in labels
     ])
     for extra in extra_rows or []:

@@ -1,7 +1,9 @@
 # @workshop/transcriber
 
 Local transcription spike (WhisperX on Apple Silicon). See [INTENT.md](INTENT.md)
-for what this is trying to prove.
+for what this is trying to prove, and
+[docs/experiments.md](docs/experiments.md) for the model/backend experiments
+behind the default configuration.
 
 Python project managed by [uv](https://docs.astral.sh/uv/); pnpm scripts are the
 uniform interface — no JS in here.
@@ -69,7 +71,9 @@ One JSON file: `meta` / `segments` / `words`.
 - Words the aligner can't place (typically digits) get `"start": null,
   "end": null, "aligned": false` — never interpolated (flag, don't repair).
 - `meta.stages` records per-stage device placement and wall clock, so every
-  output file documents its own performance.
+  output file documents its own performance. Diarization runs concurrently
+  with ASR + alignment, so stage times overlap; `meta.total_wall_clock_s`
+  (true elapsed) is the number to compare runs by, not the stage sum.
 - `meta.warnings` lists anything suspect (backfilled segments, word-count
   mismatches). An empty list means a clean run.
 

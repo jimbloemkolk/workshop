@@ -1,11 +1,16 @@
-"""The transcription pipeline: ASR -> forced alignment -> diarization -> contract JSON.
+"""The transcription pipeline: (ASR -> forced alignment) ∥ diarization -> contract JSON.
+
+Diarization needs only the raw audio, so it runs on a worker thread concurrent
+with ASR + alignment; the transcript and the speaker timeline are joined at the
+end by assign_word_speakers.
 
 Honesty rules (see INTENT.md):
 - Words the aligner cannot place get null timestamps + aligned:false. Never interpolated.
 - `words` is a flat, gap-free, globally indexed array — the seam the insight
   pipeline slices against.
 - Per-stage device placement and wall clock go into meta; every output file
-  documents its own performance.
+  documents its own performance. Stages overlap, so meta.total_wall_clock_s
+  (true elapsed) is the number to compare runs by, not the stage sum.
 """
 
 import datetime
@@ -85,15 +90,84 @@ def run(opts: Options) -> dict:
     language = None if opts.language == "auto" else opts.language
     cache = env.cache_dir()
     torch_device = env.pick_device(opts.device)
+    t_start = time.monotonic()
 
     print(f"[1/4] loading audio: {opts.audio_file}")
     with opts.timed("load_audio", "cpu"):
         audio = whisperx.load_audio(opts.audio_file)
     duration_s = round(len(audio) / SAMPLE_RATE, 2)
 
+    # Diarization needs only the raw audio, so it runs on a worker thread
+    # concurrently with ASR + alignment; the two meet in assign_word_speakers.
+    # Stage wall clocks in meta therefore overlap: total_wall_clock_s is the
+    # true elapsed time, not the sum of stages.
+    executor = diarize_future = None
+    if opts.diarize:
+        token = env.hf_token()
+        if not token:
+            raise PipelineError(
+                "token_missing",
+                "diarization needs HF_TOKEN (see README: one-time manual step)",
+                4,
+            )
+        from concurrent.futures import ThreadPoolExecutor
+
+        print(f"[2/4] diarization: {DIARIZATION_MODEL} ({torch_device}, "
+              "in background, concurrent with asr)")
+        executor = ThreadPoolExecutor(max_workers=1)
+        diarize_future = executor.submit(_diarize_infer, opts, audio, token, torch_device)
+    else:
+        print("[2/4] diarization: skipped (no --diarize)")
+
+    try:
+        result, detected_language, model_id = _asr(opts, audio, language, cache)
+
+        from whisperx.alignment import DEFAULT_ALIGN_MODELS_HF, DEFAULT_ALIGN_MODELS_TORCH
+
+        align_model_name = (
+            DEFAULT_ALIGN_MODELS_TORCH.get(detected_language)
+            or DEFAULT_ALIGN_MODELS_HF.get(detected_language)
+        )
+        if align_model_name is None:
+            raise PipelineError(
+                "no_align_model", f"no default alignment model for language: {detected_language}"
+            )
+
+        print(f"[4/4] alignment: {align_model_name} ({torch_device})")
+        with opts.timed("align_load", torch_device):
+            align_model, align_meta = whisperx.load_align_model(
+                language_code=detected_language, device=torch_device
+            )
+        with opts.timed("align", torch_device):
+            # interpolate_method="ignore": unalignable words keep NO timestamps
+            # instead of getting fabricated ones (flag, don't repair).
+            result = whisperx.align(
+                result["segments"], align_model, align_meta, audio, torch_device,
+                interpolate_method="ignore",
+            )
+        del align_model
+
+        if diarize_future is not None:
+            from whisperx.diarize import assign_word_speakers
+
+            diarize_df = diarize_future.result()
+            result = assign_word_speakers(diarize_df, result)
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=True, cancel_futures=True)
+
+    total_s = round(time.monotonic() - t_start, 2)
+    return _build_contract(
+        opts, result, duration_s, detected_language, align_model_name, model_id, total_s
+    )
+
+
+def _asr(opts: Options, audio, language: str | None, cache: Path) -> tuple[dict, str, str]:
+    import whisperx
+
     if opts.backend == "mlx":
         model_id = MLX_MODELS.get(opts.model, opts.model)
-        print(f"[2/4] asr: {model_id} (mlx, metal, language={opts.language})")
+        print(f"[3/4] asr: {model_id} (mlx, metal, language={opts.language})")
         import mlx.core as mx
         import mlx_whisper
         from mlx_whisper.transcribe import ModelHolder
@@ -106,7 +180,7 @@ def run(opts: Options) -> dict:
             )
     else:
         model_id = opts.model
-        print(f"[2/4] asr: {model_id} ({opts.compute_type}, cpu, language={opts.language})")
+        print(f"[3/4] asr: {model_id} ({opts.compute_type}, cpu, language={opts.language})")
         with opts.timed("asr_load", "cpu"):
             asr = whisperx.load_model(
                 opts.model,
@@ -118,75 +192,38 @@ def run(opts: Options) -> dict:
         with opts.timed("asr", "cpu"):
             result = asr.transcribe(audio, batch_size=opts.batch_size, language=language)
         del asr
-    detected_language = result["language"]
+    return result, result["language"], model_id
 
-    from whisperx.alignment import DEFAULT_ALIGN_MODELS_HF, DEFAULT_ALIGN_MODELS_TORCH
 
-    align_model_name = (
-        DEFAULT_ALIGN_MODELS_TORCH.get(detected_language)
-        or DEFAULT_ALIGN_MODELS_HF.get(detected_language)
-    )
-    if align_model_name is None:
-        raise PipelineError(
-            "no_align_model", f"no default alignment model for language: {detected_language}"
-        )
+def _diarize_infer(opts: Options, audio, token: str, device: str):
+    """Speaker timeline from raw audio; runs on the worker thread."""
+    from whisperx.diarize import DiarizationPipeline
 
-    print(f"[3/4] alignment: {align_model_name} ({torch_device})")
-    with opts.timed("align_load", torch_device):
-        align_model, align_meta = whisperx.load_align_model(
-            language_code=detected_language, device=torch_device
-        )
-    with opts.timed("align", torch_device):
-        # interpolate_method="ignore": unalignable words keep NO timestamps
-        # instead of getting fabricated ones (flag, don't repair).
-        result = whisperx.align(
-            result["segments"], align_model, align_meta, audio, torch_device,
-            interpolate_method="ignore",
-        )
-    del align_model
-
-    if opts.diarize:
-        token = env.hf_token()
-        if not token:
-            raise PipelineError(
-                "token_missing",
-                "diarization needs HF_TOKEN (see README: one-time manual step)",
-                4,
+    def infer(dev: str):
+        with opts.timed("diarize_load", dev):
+            pipeline = DiarizationPipeline(
+                model_name=DIARIZATION_MODEL,
+                token=token,
+                device=dev,
+                cache_dir=str(env.cache_dir() / "diarization"),
             )
-        print(f"[4/4] diarization: {DIARIZATION_MODEL} ({torch_device})")
-        try:
-            result = _diarize(opts, result, audio, token, torch_device)
-        except Exception as exc:  # MPS kernel gaps are a known hazard; retry on CPU
-            if torch_device != "mps":
-                raise
-            print(f"      diarization failed on mps ({exc}); retrying on cpu")
-            result = _diarize(opts, result, audio, token, "cpu")
-    else:
-        print("[4/4] diarization: skipped (no --diarize)")
+        with opts.timed("diarize", dev):
+            return pipeline(
+                audio, min_speakers=opts.min_speakers, max_speakers=opts.max_speakers
+            )
 
-    return _build_contract(opts, result, duration_s, detected_language, align_model_name, model_id)
-
-
-def _diarize(opts: Options, result: dict, audio, token: str, device: str) -> dict:
-    from whisperx.diarize import DiarizationPipeline, assign_word_speakers
-
-    with opts.timed("diarize_load", device):
-        pipeline = DiarizationPipeline(
-            model_name=DIARIZATION_MODEL,
-            token=token,
-            device=device,
-            cache_dir=str(env.cache_dir() / "diarization"),
-        )
-    with opts.timed("diarize", device):
-        diarize_df = pipeline(
-            audio, min_speakers=opts.min_speakers, max_speakers=opts.max_speakers
-        )
-        return assign_word_speakers(diarize_df, result)
+    try:
+        return infer(device)
+    except Exception as exc:  # MPS kernel gaps are a known hazard; retry on CPU
+        if device != "mps":
+            raise
+        print(f"      diarization failed on mps ({exc}); retrying on cpu")
+        return infer("cpu")
 
 
 def _build_contract(
     opts: Options, result: dict, duration_s: float, detected_language: str,
-    align_model_name: str, model_id: str,
+    align_model_name: str, model_id: str, total_s: float,
 ) -> dict:
     segments, words, warnings = [], [], []
 
@@ -242,6 +279,8 @@ def _build_contract(
             "whisperx_version": pkg_version("whisperx"),
             "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "stages": opts.stages,
+            # true elapsed; less than the stage sum when diarization overlaps asr
+            "total_wall_clock_s": total_s,
             "warnings": warnings,
         },
         "segments": segments,

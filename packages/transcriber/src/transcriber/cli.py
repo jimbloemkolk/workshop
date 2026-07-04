@@ -41,7 +41,7 @@ def _out_path(out: str, tag: str, multi: bool) -> str:
 
 
 def cmd_transcribe(args: argparse.Namespace) -> int:
-    from .compare import parse_specs, print_diffs, print_stage_table
+    from .compare import parse_specs, print_diffs, print_stage_table, totals
     from .pipeline import Options, PipelineError, run
 
     try:
@@ -69,10 +69,8 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
             out = _out_path(args.out, tag, multi=len(specs) > 1)
             with open(out, "w") as fh:
                 json.dump(result, fh, ensure_ascii=False, indent=1)
-            stages = result["meta"]["stages"]
-            total = round(sum(s["wall_clock_s"] for s in stages.values()), 1)
-            work = sum(s["wall_clock_s"] for n, s in stages.items()
-                       if not n.endswith("_load"))
+            total, work = totals(result["meta"])
+            total = round(total, 1)
             speed = round(result["meta"]["duration_s"] / work, 1) if work else 0
             print(f"done: {len(result['words'])} words, "
                   f"{result['meta']['duration_s']}s audio in {total}s "
