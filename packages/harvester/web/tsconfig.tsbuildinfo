@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/api.ts","./src/audio.ts","./src/main.tsx","./src/socket.ts","./src/components/markbutton.tsx","./src/views/calllinksview.tsx","./src/views/joinview.tsx","./src/views/labelview.tsx","./src/views/pipelineview.tsx","./src/views/recordingopenview.tsx","./src/views/reviewview.tsx","./src/views/sessionlist.tsx","./vite.config.ts"],"version":"5.9.3"}

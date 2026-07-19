@@ -1,0 +1,28 @@
+# LiveKit server config for the harvester call stack (dev + homelab).
+# Keys here are dev defaults; the homelab overrides them via its own copy.
+port: 7880
+bind_addresses:
+  - ""
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50099
+  use_external_ip: false
+redis:
+  address: redis:6379
+keys:
+  # matches LIVEKIT_API_KEY / LIVEKIT_API_SECRET defaults in the backend .env
+  devkey: devsecret_devsecret_devsecret_dev
+room:
+  auto_create: true
+  # backstop: a room with both parties gone dies after 15 minutes; the
+  # session id keys everything, so a recreated room is normal, not an error
+  empty_timeout: 900
+webhook:
+  api_key: devkey
+  urls:
+    # dev shape: the backend runs natively on the Mac. The homelab copy
+    # points this at http://app:4747/api/call/webhook instead.
+    - http://host.docker.internal:4747/api/call/webhook
+logging:
+  level: info

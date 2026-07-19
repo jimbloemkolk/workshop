@@ -1,0 +1,10 @@
+# LiveKit egress worker config (track egress → Opus/Ogg files in the shared
+# session-dir volume).
+redis:
+  address: redis:6379
+api_key: devkey
+api_secret: devsecret_devsecret_devsecret_dev
+ws_url: ws://livekit:7880
+insecure: true
+logging:
+  level: info

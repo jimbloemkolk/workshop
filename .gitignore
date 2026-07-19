@@ -31,3 +31,5 @@ datasets
 datasets.json
 data
 out
+# machine-specific env (compose interpolation, secrets)
+.env

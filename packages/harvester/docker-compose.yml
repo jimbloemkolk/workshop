@@ -1,0 +1,73 @@
+# Media stack for the call feature (see call/DESIGN.md).
+#
+# Dev (Mac): only the media stack runs in containers; the backend runs
+# natively (`pnpm --filter @workshop/harvester-backend dev`).
+#   docker compose up
+#
+# Homelab: the app joins the stack behind the `app` profile:
+#   docker compose --profile app up -d
+#
+# The egress container must write into the same session dirs the backend
+# reads. Both sides use the SAME absolute path: set HARVESTER_DATA_DIR in a
+# `.env` file next to this compose file (compose interpolates it below, and
+# the backend reads the same variable). Example:
+#   HARVESTER_DATA_DIR=/Users/jim/.local/share/harvester
+services:
+  redis:
+    # Exists solely as the LiveKit↔egress message bus; nothing of ours
+    # reads or writes it.
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  livekit:
+    image: livekit/livekit-server:v1.9
+    # --node-ip: the address advertised in ICE candidates. Auto-detection
+    # yields the container-internal IP, which no browser can reach (and
+    # browsers hide their own candidates behind mDNS, so the reverse path
+    # is dead too). 127.0.0.1 works for same-device calls; set
+    # LIVEKIT_NODE_IP in .env to your LAN/tailnet IP for other devices.
+    command: --config /etc/livekit.yaml --node-ip ${LIVEKIT_NODE_IP:-127.0.0.1}
+    depends_on:
+      - redis
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"                     # websocket + http API
+      - "7881:7881"                     # ICE over TCP (trains love hostile networks)
+      - "50000-50099:50000-50099/udp"   # media
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  egress:
+    image: livekit/egress:v1.9
+    depends_on:
+      - redis
+      - livekit
+    environment:
+      - EGRESS_CONFIG_FILE=/etc/egress.yaml
+    volumes:
+      - ./egress.yaml:/etc/egress.yaml:ro
+      - ${HARVESTER_DATA_DIR:?set HARVESTER_DATA_DIR in packages/harvester/.env}:${HARVESTER_DATA_DIR}
+    # egress needs a large shm for its media pipelines
+    shm_size: "1gb"
+
+  app:
+    profiles: ["app"]
+    build:
+      context: ../..
+      dockerfile: packages/harvester/backend/Dockerfile
+    depends_on:
+      - livekit
+    environment:
+      - HARVESTER_DATA_DIR=${HARVESTER_DATA_DIR}
+      - HARVESTER_VAULT_DIR=${HARVESTER_VAULT_DIR:-}
+      - HARVESTER_PUBLIC_URL=${HARVESTER_PUBLIC_URL:-}
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-devsecret_devsecret_devsecret_dev}
+    volumes:
+      - ${HARVESTER_DATA_DIR}:${HARVESTER_DATA_DIR}
+      - ${HARVESTER_VAULT_DIR:-/dev/null}:${HARVESTER_VAULT_DIR:-/tmp/vault-unset}
+    ports:
+      - "4747:4747"

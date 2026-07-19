@@ -1,0 +1,41 @@
+[project]
+name = "transcriber"
+version = "0.1.0"
+description = "Local transcription spike for the Insight Harvester (WhisperX test-drive)"
+readme = "README.md"
+authors = [
+    { name = "Jim Bloemkolk", email = "jimbloemkolk@gmail.com" }
+]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mlx-whisper==0.4.3",
+    "whisperx==3.8.6",
+    # declared (not just transitive via whisperx) so the tool.uv.sources
+    # index pin below can reach them — uv sources don't apply to transitives
+    "torch",
+    "torchaudio",
+    "torchvision",
+    "torchcodec",
+]
+
+[project.scripts]
+transcriber = "transcriber.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.26,<0.12.0"]
+build-backend = "uv_build"
+
+# On linux the default PyPI torch wheels drag in the full CUDA stack
+# (~12 GB of nvidia-* packages) — dead weight for the ct2/CPU backend the
+# server runs. Pin the torch family to PyTorch's CPU index there; macOS
+# resolves from PyPI as before (its wheels are CPU/MPS already).
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchaudio = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchcodec = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]

@@ -1,0 +1,17 @@
+# The build context is the repo root (packages/harvester/backend/Dockerfile).
+# Remote podman builds upload the whole context, so keep it to exactly what
+# the Dockerfile COPYs: root manifests + harvester + transcriber sources.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!packages/harvester
+!packages/transcriber
+# prune junk inside the whitelisted trees: installed/derived files, and
+# .env files (HF_TOKEN, LiveKit secrets) that must never enter an image
+packages/harvester/**/node_modules
+packages/harvester/web/dist
+packages/transcriber/.venv
+packages/transcriber/**/__pycache__
+**/.env
+**/*.log
