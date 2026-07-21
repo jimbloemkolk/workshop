@@ -111,10 +111,13 @@ export function ReviewView({ detail, refresh, onError }: {
       return
     }
     if (!current) {
-      // No insight selected and not building a new one: a plain click is
-      // free to mean "play from here" instead — jump the full-session
-      // player to this word and start it, taking over from whatever
-      // (session bar or an insight snippet) was playing before.
+      // No insight selected and not building a new one: click-to-jump is
+      // only the primary interaction WHILE something is actually playing —
+      // paused/idle, a plain click does nothing at all, so the text stays
+      // freely selectable for the selection→snippet chip instead (dragging
+      // to select while mid-playback still works too, per the guard on the
+      // span's own onClick; this only governs the plain-click case here).
+      if (player.playingKey == null) return
       const atS = wordPlayTime(index)
       if (atS != null) player.playFrom('session', 0, detail.session.durationS, atS)
       return
@@ -124,6 +127,25 @@ export function ReviewView({ detail, refresh, onError }: {
     } else if (index < current.endWord) {
       void patch(current.id, { startWord: index })
     }
+  }
+
+  // Second path to the exact same result as the two-click "+ new insight"
+  // flow above — reuses api.manualInsight, not a parallel implementation.
+  // manualInsight's response already carries the freshly-created insight, so
+  // there's no need to wait for a second round-trip just to find its id:
+  // diff against the insight ids we already knew about to select the new
+  // card immediately (the two-click flow never bothered to auto-select,
+  // this one does, per spec).
+  const createFromSelection = async (startWord: number, endWord: number) => {
+    setBusy(true)
+    try {
+      const existingIds = new Set(insights.map((i) => i.id))
+      const newDetail = await api.manualInsight(id, startWord, endWord)
+      const created = newDetail.insights.find((i) => !existingIds.has(i.id))
+      setNewModeOn(false)
+      if (created) setSelected(created.id)
+      refresh()
+    } catch (e) { onError(String(e)) } finally { setBusy(false) }
   }
 
   const doExport = async () => {
@@ -142,6 +164,14 @@ export function ReviewView({ detail, refresh, onError }: {
   }
 
   const acceptedCount = insights.filter((i) => i.status === 'accepted').length
+
+  // Cursor-only signal for TranscriptPane, so the click-vs-select mode isn't
+  // invisible: true in exactly the state where onWordClick's own "no
+  // selection, not playing" branch does nothing at all (see there) — new-
+  // insight mode and editing a selected insight's range keep the normal
+  // pointer cursor in both playback states, since clicking still does
+  // something in those modes regardless of whether audio is playing.
+  const wordsAreSelectable = !newModeOn && !current && player.playingKey == null
 
   return (
     <main className="review">
@@ -165,6 +195,8 @@ export function ReviewView({ detail, refresh, onError }: {
             onWordClick={onWordClick}
             playheadS={player.activeKey != null ? player.position : null}
             isPlaying={player.playingKey != null}
+            selectable={wordsAreSelectable}
+            onCreateFromSelection={createFromSelection}
           />
         ) : <p className="muted">loading transcript…</p>}
       </section>
@@ -228,7 +260,39 @@ function findSegmentAt(bounds: { id: number; startS: number; endS: number }[], t
   return bounds[lo]?.id ?? null
 }
 
-function TranscriptPane({ transcript, speakerName, highlight, pendingStart, onWordClick, playheadS, isPlaying }: {
+/** Word range (in transcript word indexes) a text selection touches, or null
+ * if the selection doesn't overlap any word span at all. Deliberately NOT
+ * "walk up from anchorNode/focusNode to the nearest [data-word-index]" —
+ * that fails whenever either endpoint lands outside a word span (dragging
+ * from the now-unselectable speaker column, from inter-segment whitespace,
+ * or past the last word), which is exactly one of the edge cases this needs
+ * to handle. Instead: ask the Range itself (which normalizes start/end to
+ * document order regardless of drag direction, so backwards selections need
+ * no special-casing) which indexed word spans it actually intersects, across
+ * every segment at once (so multi-segment selections fall out for free) —
+ * min/max of whatever's touched is the range, and touching nothing at all is
+ * the only case that returns null. */
+function wordRangeFromSelection(sel: Selection): { start: number; end: number; rect: DOMRect } | null {
+  if (sel.isCollapsed || sel.rangeCount === 0) return null
+  const range = sel.getRangeAt(0)
+  let start = Infinity
+  let end = -Infinity
+  for (const el of document.querySelectorAll<HTMLElement>('[data-word-index]')) {
+    if (!range.intersectsNode(el)) continue
+    const idx = Number(el.dataset.wordIndex)
+    if (idx < start) start = idx
+    if (idx + 1 > end) end = idx + 1
+  }
+  if (start > end) return null
+  const rects = range.getClientRects()
+  const rect = rects[rects.length - 1] ?? range.getBoundingClientRect()
+  return { start, end, rect }
+}
+
+function TranscriptPane({
+  transcript, speakerName, highlight, pendingStart, onWordClick, playheadS, isPlaying, selectable,
+  onCreateFromSelection,
+}: {
   transcript: Transcript
   speakerName: Map<string, string>
   highlight: Insight | null
@@ -239,6 +303,13 @@ function TranscriptPane({ transcript, speakerName, highlight, pendingStart, onWo
    * when nothing has ever played. Drives the "now speaking" highlight. */
   playheadS: number | null
   isPlaying: boolean
+  /** Cursor-only: true exactly when a plain word click does nothing (no
+   * insight selected, not building one, nothing playing) — swaps the
+   * pointer cursor for a text cursor so "clicking does nothing here, but
+   * you can select" isn't invisible. Doesn't gate any actual behavior;
+   * onWordClick's own logic (in ReviewView) already decides that. */
+  selectable: boolean
+  onCreateFromSelection: (startWord: number, endWord: number) => void
 }) {
   const bySegment = useMemo(() => {
     const map = new Map<number, typeof transcript.words>()
@@ -308,6 +379,60 @@ function TranscriptPane({ transcript, speakerName, highlight, pendingStart, onWo
       ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [activeSegmentId, isPlaying])
 
+  // "Select spoken text → create a snippet" chip. One settle-debounced
+  // selectionchange listener drives both the drag-selection path and (via
+  // Escape/scroll/click-elsewhere) dismissal — deliberately not a separate
+  // mouseup listener too: mouseup's own selectionchange has already fired by
+  // the time it's dispatched, so the debounce timer set by that last event
+  // already covers "drag just ended," with no double-handling needed. The
+  // 150ms debounce is what keeps this from flickering on every intermediate
+  // selectionchange while the user is still dragging.
+  const [chip, setChip] = useState<{ start: number; end: number; x: number; y: number } | null>(null)
+  useEffect(() => {
+    let settleTimer: ReturnType<typeof setTimeout> | null = null
+    const settle = () => {
+      const sel = window.getSelection()
+      const found = sel ? wordRangeFromSelection(sel) : null
+      setChip(found ? { start: found.start, end: found.end, x: found.rect.right, y: found.rect.bottom } : null)
+    }
+    const onSelectionChange = () => {
+      if (settleTimer) clearTimeout(settleTimer)
+      settleTimer = setTimeout(settle, 150)
+    }
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setChip(null) }
+    const onScroll = () => setChip(null)
+    // Dismiss on any click outside the chip itself (the chip's own mousedown
+    // handler stops propagation before this ever sees it) — including the
+    // mousedown that STARTS a new drag, which is correct: that selection's
+    // own settle() will show a fresh, correctly-positioned chip afterward.
+    const onMouseDown = () => setChip(null)
+    // Right-click with an active selection shows the same chip instead of
+    // the browser menu; without one, the native menu is left alone.
+    const onContextMenu = (e: MouseEvent) => {
+      const sel = window.getSelection()
+      const found = sel ? wordRangeFromSelection(sel) : null
+      if (!found) return
+      e.preventDefault()
+      setChip({ start: found.start, end: found.end, x: found.rect.right, y: found.rect.bottom })
+    }
+    document.addEventListener('selectionchange', onSelectionChange)
+    document.addEventListener('keydown', onKeyDown)
+    // capture: scroll doesn't bubble, but it does fire on ancestors in the
+    // capture phase — this catches the transcript pane's own scroll without
+    // needing a ref to that element (owned by ReviewView, not this component).
+    document.addEventListener('scroll', onScroll, true)
+    document.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('contextmenu', onContextMenu)
+    return () => {
+      if (settleTimer) clearTimeout(settleTimer)
+      document.removeEventListener('selectionchange', onSelectionChange)
+      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('scroll', onScroll, true)
+      document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('contextmenu', onContextMenu)
+    }
+  }, [])
+
   return (
     <>
       {transcript.segments.map((seg) => (
@@ -318,24 +443,50 @@ function TranscriptPane({ transcript, speakerName, highlight, pendingStart, onWo
         >
           <span className="speaker-tag">
             {seg.speaker ? speakerName.get(seg.speaker) ?? seg.speaker : '?'}
-          </span>{' '}
-          {(bySegment.get(seg.id) ?? []).map((w) => {
-            const inHighlight = highlight != null &&
-              w.index >= highlight.startWord && w.index < highlight.endWord
-            const isPending = pendingStart === w.index
-            const isNowWord = w.index === activeWordIndex
-            return (
-              <span
-                key={w.index}
-                className={`word${inHighlight ? ' hl' : ''}${isPending ? ' pending' : ''}${w.aligned ? '' : ' unaligned'}${isNowWord ? ' now-word' : ''}`}
-                onClick={(e) => onWordClick(w.index, e.shiftKey)}
-              >
-                {w.text}{' '}
-              </span>
-            )
-          })}
+          </span>
+          <span className={`segment-words${selectable ? ' selectable' : ''}`}>
+            {(bySegment.get(seg.id) ?? []).map((w) => {
+              const inHighlight = highlight != null &&
+                w.index >= highlight.startWord && w.index < highlight.endWord
+              const isPending = pendingStart === w.index
+              const isNowWord = w.index === activeWordIndex
+              return (
+                <span
+                  key={w.index}
+                  data-word-index={w.index}
+                  className={`word${inHighlight ? ' hl' : ''}${isPending ? ' pending' : ''}${w.aligned ? '' : ' unaligned'}${isNowWord ? ' now-word' : ''}`}
+                  onClick={(e) => {
+                    // A drag-selection's terminating mouseup can also fire a
+                    // click on that same word — with an active (non-collapsed)
+                    // selection, word-click's own effects (seeking playback,
+                    // moving an insight's boundary) must be suppressed, or
+                    // just trying to select text would also jump playback.
+                    if (window.getSelection()?.isCollapsed === false) return
+                    onWordClick(w.index, e.shiftKey)
+                  }}
+                >
+                  {w.text}{' '}
+                </span>
+              )
+            })}
+          </span>
         </p>
       ))}
+      {chip && (
+        <div
+          className="selection-chip"
+          style={{ left: chip.x, top: chip.y }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => {
+            const { start, end } = chip
+            setChip(null)
+            window.getSelection()?.removeAllRanges()
+            onCreateFromSelection(start, end)
+          }}
+        >
+          ✚ snippet
+        </div>
+      )}
     </>
   )
 }

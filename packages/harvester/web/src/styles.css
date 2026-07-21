@@ -161,25 +161,47 @@ blockquote {
   max-height: calc(100vh - 8rem); overflow-y: auto; padding-right: 0.75rem;
   line-height: 1.9; font-size: 1.02rem;
 }
-/* margin-left/padding-left below net to a ~0 visual indent (-1.06rem +
-   1rem) and are permanent on every segment — not just .now-playing — so
-   toggling the highlight only ever repaints (background/box-shadow color),
-   never resizes or reflows the paragraph or its neighbors. The extra 0.4rem
-   of matched margin/padding (vs. a bare ~0 inset) is left-breathing-room for
-   the wash so it reads as a box around the speaker tag + line, not a strip
-   flush against the text. */
+/* Two-column layout: speaker name | spoken text, grid so both stay
+   baseline-aligned and every segment's text column starts at the identical
+   x-position regardless of name length (a fixed first-column width, not
+   subgrid — simpler, and names are always short). margin-left/padding-left
+   below net to a ~0 visual indent (-1.06rem + 1rem) and are permanent on
+   every segment — not just .now-playing — so toggling the highlight only
+   ever repaints (background/box-shadow color), never resizes or reflows the
+   row or its neighbors; since .segment is the grid container spanning both
+   columns, that repaint already covers the full row including the speaker
+   cell for free. The extra 0.4rem of matched margin/padding (vs. a bare ~0
+   inset) is left-breathing-room for the wash so it reads as a box around
+   the row, not a strip flush against the text. */
 .segment {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  column-gap: 0.7rem;
+  align-items: baseline;
   margin: 0 0 0.7rem -1.06rem;
   padding: 0.1rem 0 0.1rem 1rem;
   border-radius: 2px;
   box-shadow: inset 3px 0 0 transparent;
   transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
+@media (max-width: 480px) {
+  .segment { grid-template-columns: 1fr; row-gap: 0.1rem; }
+  .speaker-tag { text-align: left; }
+}
 .speaker-tag {
   font-size: 0.6rem; color: var(--muted);
-  margin-right: 0.4rem;
+  text-align: right;
+  /* The whole point of the two-column split: dragging to select spoken
+     text must never also pick up the speaker's name. */
+  user-select: none;
 }
 .word { cursor: pointer; border-radius: 2px; transition: background-color 0.15s ease; }
+/* Playback-state-dependent click mode, made visible rather than silently
+   invisible: .segment-words.selectable is the state where a plain word
+   click does nothing at all (see ReviewView's onWordClick/wordsAreSelectable)
+   — a text cursor reads as "select me" instead of the default pointer's
+   "click me", without needing any other visual change. */
+.segment-words.selectable .word { cursor: text; }
 .word:hover { background: var(--accent-wash); }
 .word.hl { background: var(--accent-soft); }
 .word.pending { outline: 1px solid var(--accent); }
@@ -193,6 +215,22 @@ blockquote {
   background: var(--accent-wash);
 }
 .word.now-word { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+/* Floating "create snippet from selection" affordance — position: fixed
+   (not absolute) deliberately: the transcript pane scrolls internally, and
+   fixed viewport coordinates from the Selection Range's own
+   getClientRects() stay correct regardless of that scroll state, with no
+   need to translate into a scrolling ancestor's coordinate space. */
+.selection-chip {
+  position: fixed;
+  z-index: 30;
+  background: var(--surface); color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 999px;
+  padding: 0.35rem 0.75rem; font-size: 0.65rem;
+  cursor: pointer; white-space: nowrap; user-select: none;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  transition: background-color 0.15s ease;
+}
+.selection-chip:hover { background: var(--accent-soft); }
 .insights { max-height: calc(100vh - 8rem); overflow-y: auto; display: flex; flex-direction: column; gap: 0.8rem; }
 .toolbar { position: sticky; top: 0; background: var(--paper); padding: 0.4rem 0; z-index: 1; }
 .card {
