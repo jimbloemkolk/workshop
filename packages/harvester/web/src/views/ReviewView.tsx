@@ -3,6 +3,18 @@ import { api, type Insight, type SessionDetail, type Transcript } from '../api'
 import { useRangePlayer, type RangePlayer } from '../audio'
 import { SnippetPlayer } from '../components/SnippetPlayer'
 
+/** Insight cards render in conversation order, not creation/id order —
+ * otherwise a just-created selection-snippet (see createFromSelection below)
+ * would land at the bottom of the pane even when it quotes the very first
+ * sentence. Pure and side-effect-free: returns a new array (Array.prototype.
+ * sort mutates in place, and callers pass `detail.insights` straight from
+ * props — mutating that would be a prop-mutation bug), never touches its
+ * input. Exported directly for unit testing. */
+export function sortByAppearance(insights: Insight[]): Insight[] {
+  return [...insights].sort((a, b) =>
+    a.startWord - b.startWord || a.endWord - b.endWord || a.id - b.id)
+}
+
 /** Review: transcript on the left, proposals on the right. Click a word to
  * move the selected insight's start, shift-click to move its end; in
  * new-insight mode the same two clicks create a manual insight. */
@@ -165,6 +177,11 @@ export function ReviewView({ detail, refresh, onError }: {
 
   const acceptedCount = insights.filter((i) => i.status === 'accepted').length
 
+  // Card order in the pane follows the conversation, not creation/id order —
+  // otherwise a just-created selection-snippet (see createFromSelection)
+  // lands at the bottom even when it quotes the very first sentence.
+  const sortedInsights = useMemo(() => sortByAppearance(insights), [insights])
+
   // Cursor-only signal for TranscriptPane, so the click-vs-select mode isn't
   // invisible: true in exactly the state where onWordClick's own "no
   // selection, not playing" branch does nothing at all (see there) — new-
@@ -217,7 +234,7 @@ export function ReviewView({ detail, refresh, onError }: {
         </div>
         {report && <p className="report">{report}</p>}
         {insights.length === 0 && <p className="muted">No proposals yet.</p>}
-        {insights.map((i) => (
+        {sortedInsights.map((i) => (
           <InsightCard
             key={i.id}
             insight={i}
