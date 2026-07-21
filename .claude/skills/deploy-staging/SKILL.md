@@ -41,10 +41,19 @@ not host root).
    context (root manifests, `packages/harvester`, `packages/transcriber`) to
    `/data/apps/applepie/harvester-src`, builds `localhost/applepie-harvester-app`
    NATIVELY on the x86 box (the image bakes `web/dist` in; it cannot build on
-   Apple Silicon — torchcodec ships no arm64 wheels), then restarts the
-   `harvester-*` systemd user units. `DEPLOY_PROVISION_SECRETS=0` skips the
-   interactive secret pass (secrets already exist in the tier's podman store).
-   Deploys the LOCAL tree — no push to GitHub required or implied.
+   Apple Silicon — torchcodec ships no arm64 wheels; the Dockerfile is layered so
+   the transcriber's uv-synced Python env is cache-hit on a typical app-only
+   change — only the harvester COPY + web build actually rerun), then restarts
+   only what actually needs it: `harvester-app.service` when the image's content
+   changed (the common case), any `harvester-*` unit whose *own unit file*
+   changed this deploy, or every unit unconditionally under
+   `DEPLOY_RESTART_ALL=1`. A typical app-only deploy therefore never bounces
+   `harvester-livekit`/`harvester-egress`/`harvester-redis` (no dropped calls).
+   Registry images (`livekit-server`, `egress`, `redis`) are pulled only under
+   `DEPLOY_PULL_IMAGES=1` (opt-in — set it once when actually bumping a tag).
+   `DEPLOY_PROVISION_SECRETS=0` skips the interactive secret pass (secrets
+   already exist in the tier's podman store). Deploys the LOCAL tree — no push
+   to GitHub required or implied.
 5. Only deploy the stack that changed (`harvester`; `caddy` exists too).
 
 ## Verify (all three, every time)

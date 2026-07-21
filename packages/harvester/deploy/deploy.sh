@@ -40,15 +40,39 @@
 # podman store, and interactively resolves any missing ones (enter now / skip / recheck).
 # Nothing secret is committed or written to disk.
 #
-# Images: before restarting, deploy pulls every registry Image= the deployed stacks
-# reference (skipping *.build refs — those are unit names realised on the box, not
-# registry pulls). A failed pull only warns; the restart proceeds on the local image.
+# Images: registry Image= refs (skipping *.build refs — those are unit names realised
+# on the box, not registry pulls) are pulled ONLY when DEPLOY_PULL_IMAGES=1 — opt-in,
+# since these three (livekit-server, egress, redis) rarely change deploy to deploy; set
+# it the one time you're actually bumping a tag. A failed pull only warns; the restart
+# proceeds on the local image.
+#
+# Restarts: a *.container/*.pod unit only restarts if (a) its own unit file's content
+# actually changed this deploy — the previously-installed copy in $QDIR is diffed
+# against the incoming one before being overwritten — or (b) it's backed by a *.build
+# (harvester-app.container, caddy.container) whose synced BUILD CONTEXT hash changed
+# since the last deploy (a marker under .deploy-state/ on the box; see
+# context_hash/mark_if_changed). That's a build-context hash, not a
+# `podman image inspect` image-ID diff, deliberately: restarting a unit also
+# re-triggers Quadlet's OWN rebuild via the unit's Build= dependency, using a
+# different podman invocation than this script's own live-streamed build — verified
+# on the box that the two invocations produce two different (but individually
+# stable) image IDs for byte-identical input, which would make an image-ID diff
+# taken around this script's build flip on every deploy regardless of whether
+# anything real changed. A pure cache-hit rebuild (the common case once the
+# Dockerfile's slow layers are cached — see backend/Dockerfile's own ordering
+# comments) changes the context-hash nothing, so it forces nothing: an app-only
+# deploy no longer bounces harvester-livekit/egress/redis (or drops an active call)
+# just because their unchanged unit files got re-synced. DEPLOY_RESTART_ALL=1
+# restores the old restart-everything-unconditionally behavior.
 #
 # Env:
 #   HOMELAB_HOST              ssh host/alias of dev-hub (default: applepie.diplodocus-decibel.ts.net)
 #   HOMELAB_APPS_DIR          apps root on the box        (default: /data/apps)
 #   DEPLOY_PROVISION_SECRETS  set to 0 to skip the secret pass (default: 1)
-#   DEPLOY_PULL_IMAGES        set to 0 to skip the image-refresh pass (default: 1)
+#   DEPLOY_PULL_IMAGES        set to 1 to pull every registry Image= before restarting
+#                             (default: 0 — see "Images" above)
+#   DEPLOY_RESTART_ALL        set to 1 to restart every unit unconditionally, regardless
+#                             of what changed (default: 0 — see "Restarts" above)
 #
 set -euo pipefail
 
@@ -161,7 +185,7 @@ image_names() {  # stack...
 }
 
 pull_images() {  # stack...
-	[ "${DEPLOY_PULL_IMAGES:-1}" = 1 ] || return 0
+	[ "${DEPLOY_PULL_IMAGES:-0}" = 1 ] || return 0
 	local names
 	names="$(image_names "$@")"
 	[ -n "$names" ] || return 0
@@ -186,6 +210,47 @@ build_live() {  # image_tag  workdir  containerfile
 	log "Building $tag (live output) …"
 	ssh "$TARGET" "podman build -f '$file' -t '$tag' '$workdir'" \
 		|| die "build failed for $tag"
+}
+
+# --- build-context change detection (drives the force-restart decision) ---------
+# The obvious approach — `podman image inspect -f '{{.Id}}'` before/after THIS
+# script's own build — turned out NOT to work: restarting a unit also re-triggers
+# Quadlet's OWN rebuild via the unit's Build= dependency (see build_live's comment
+# above), using a *different* podman invocation (Quadlet's generated ExecStart vs.
+# this script's ssh'd one — `systemctl --user show <build>.service -p ExecStart`
+# shows the difference). Verified on the actual box: for byte-identical inputs, the
+# two invocations consistently produce two DIFFERENT (but each individually stable)
+# image IDs. Since every restart re-runs Quadlet's flavor, an ID diff taken around
+# this script's OWN build would flip on literally every deploy regardless of
+# whether anything real changed — which would have made Deploy B of the three-part
+# staging test still force a restart every time. Hashing the already-synced ON-DISK
+# build context instead sidesteps the whole problem: it's the exact same directory
+# tree either builder reads from, so it doesn't matter which one actually builds.
+context_hash() {  # dir
+	ssh "$TARGET" "cd '$1' 2>/dev/null && find . -type f | LC_ALL=C sort | xargs -r sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1"
+}
+
+# Hashes $1 (a build context already synced onto the box) and compares it against
+# the marker left by the last deploy of $3 — stored under a dedicated state dir
+# that no stack's own `rsync --delete` can ever reach, so it survives across
+# deploys untouched by anything else. Appends $2 (systemd service name) to the
+# global force_restart array when the hash changed, or there was no prior marker
+# (first-ever deploy of this stack) — then updates the marker for next time.
+mark_if_changed() {  # dir  service_name  label
+	# NOTE: `marker` deliberately isn't assigned inline here alongside dir/svc/label —
+	# under `set -u`, a `local a=1 b="$a"` on the same line raises "a: unbound
+	# variable" (bash expands all the assignments' right-hand sides before any of
+	# that local statement's declarations actually take effect), so a var that
+	# depends on an earlier one in the same call needs its own statement below.
+	local dir="$1" svc="$2" label="$3" cur prev marker
+	marker="$APPS_DIR/$TIER/.deploy-state/$label.hash"
+	cur="$(context_hash "$dir")"
+	prev="$(ssh "$TARGET" "cat '$marker' 2>/dev/null" || true)"
+	if [ "$cur" != "$prev" ]; then
+		force_restart+=("$svc")
+	fi
+	ssh "$TARGET" "mkdir -p '$(dirname "$marker")' && printf '%s' '$cur' > '$marker'" \
+		|| echo "  !! could not persist build-context marker for $label (next deploy may over-restart)" >&2
 }
 
 # --- harvester-app.build's build context (repo root subset) ----------------------
@@ -234,37 +299,80 @@ for stack in "${stacks[@]}"; do
 done
 
 # Trigger each deployed stack's build LIVE, so the terminal actually shows progress.
+# force_restart collects the systemd service names mark_if_changed decides actually
+# need a restart (their build context's hash changed) — see its own comment.
+declare -a force_restart=()
 for stack in "${stacks[@]}"; do
 	case "$stack" in
 		caddy)
+			mark_if_changed "$APPS_DIR/$TIER/caddy" caddy.service caddy
 			build_live localhost/applepie-caddy:latest "$APPS_DIR/$TIER/caddy" Containerfile
 			;;
 		harvester)
 			sync_build_context
+			mark_if_changed "$APPS_DIR/$TIER/harvester-src" harvester-app.service harvester-app
 			build_live localhost/applepie-harvester-app:latest \
 				"$APPS_DIR/$TIER/harvester-src" packages/harvester/backend/Dockerfile
 			;;
 	esac
 done
 
+# Join force_restart into a single CSV positional arg for the remote script below (a
+# count-prefixed variadic scheme would work too, but this is simpler to get right
+# alongside the also-variadic $stacks that follows it).
+force_restart_csv=""
+if ((${#force_restart[@]})); then
+	force_restart_csv="$(printf '%s,' "${force_restart[@]}")"
+	force_restart_csv="${force_restart_csv%,}"
+fi
+
 provision_secrets "${stacks[@]}"
 pull_images "${stacks[@]}"
 
 # Apply on the host, as the applepie user (via dev-hub's bind-mounted CONTAINER_HOST /
 # DBUS_SESSION_BUS_ADDRESS — no XDG_RUNTIME_DIR export needed here, see header).
-ssh "$TARGET" 'bash -s' -- "$APPS_DIR/$TIER" "$QDIR" "${stacks[@]}" <<'REMOTE'
+ssh "$TARGET" 'bash -s' -- "$APPS_DIR/$TIER" "$QDIR" "${DEPLOY_RESTART_ALL:-0}" \
+	"$force_restart_csv" "${stacks[@]}" <<'REMOTE'
 set -euo pipefail
 apps_root="$1"; shift
 QDIR="$1"; shift
+restart_all="$1"; shift
+force_restart_csv="$1"; shift
 mkdir -p "$QDIR"
 shopt -s nullglob
 deployed=("$@")
 
-# 1. Install unit files into Quadlet's search directory.
+# service names build_live decided need forcing (their image content-hash changed this
+# deploy), one per line — passed in as a single CSV arg since it's variadic just like
+# $deployed that follows it.
+force_units="$(printf '%s' "$force_restart_csv" | tr ',' '\n')"
+
+# True if $1 appears as a whole line in the newline-separated string $2 — the
+# membership test for both changed_units (below) and force_units (above).
+is_listed() { printf '%s\n' "$2" | grep -qxF "$1"; }
+
+# 1. Install unit files into Quadlet's search directory, noting which *.container/*.pod
+# units' CONTENT actually changed (the previously-installed copy in $QDIR, if any,
+# diffed against the incoming one BEFORE it gets overwritten) — feeds the restart
+# decision in step 3, alongside force_units above and DEPLOY_RESTART_ALL below. `cmp -s`
+# rather than a literal hash-and-compare: both files are simultaneously present on this
+# same host, so a direct byte comparison is simpler and just as correct.
+changed_units=""
 for stack in "${deployed[@]}"; do
 	src="$apps_root/$stack"
 	[[ -d "$src" ]] || { echo "  !! $stack missing on host, skipping" >&2; continue; }
 	for unit in "$src"/*.container "$src"/*.network "$src"/*.pod "$src"/*.volume "$src"/*.build; do
+		[[ -e "$unit" ]] || continue
+		base="$(basename "$unit")"
+		case "$unit" in
+			*.container | *.pod)
+				installed="$QDIR/$base"
+				if [[ ! -e "$installed" ]] || ! cmp -s "$installed" "$unit"; then
+					changed_units="$changed_units
+$base"
+				fi
+				;;
+		esac
 		cp -f "$unit" "$QDIR/"
 	done
 done
@@ -289,21 +397,34 @@ done
 # 2. Regenerate the systemd services from the units (once).
 systemctl --user daemon-reload
 
-# 3. (Re)start the container/pod units. Quadlet's generated service names differ by
+# 3. (Re)start only the container/pod units that actually need it: content changed
+# this deploy (changed_units, step 1), backing image just rebuilt (force_units, from
+# build_live locally), or DEPLOY_RESTART_ALL=1 unconditionally restarting everything
+# (the old behavior, as an escape hatch). Quadlet's generated service names differ by
 # unit type: foo.container -> foo.service, foo.pod -> foo-POD.service.
 rc=0
+any=0
 for stack in "${deployed[@]}"; do
 	src="$apps_root/$stack"
 	for unit in "$src"/*.container "$src"/*.pod; do
+		[[ -e "$unit" ]] || continue
+		base="$(basename "$unit")"
 		case "$unit" in
 			*.pod) svc="$(basename "${unit%.*}")-pod.service" ;;
 			*)     svc="$(basename "${unit%.*}").service" ;;
 		esac
+		restart=0
+		[[ "$restart_all" = 1 ]] && restart=1
+		is_listed "$base" "$changed_units" && restart=1
+		is_listed "$svc" "$force_units" && restart=1
+		[[ "$restart" = 1 ]] || continue
 		echo "  ~ restart $svc"
 		systemctl --user restart "$svc" \
 			|| { echo "  !! $svc failed — see: journalctl --user -u $svc" >&2; rc=1; }
+		any=1
 	done
 done
+[[ "$any" = 1 ]] || echo "  (nothing to restart — no unit files or images changed)"
 exit $rc
 REMOTE
 
