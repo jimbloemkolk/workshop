@@ -1,0 +1,14 @@
+# Jesse's harvester fork — LiveKit signaling websocket (wss://). Host-matched inside the
+# wildcard *.staging.applepie.company block, so this fragment just host-matches and
+# proxies (the wildcard cert covers it). Backend (../harvester/) publishes on host
+# loopback 127.0.0.1:17880, forwarded into this container by applepie.pod's `-T,17880`
+# pasta entry. Caddy upgrades the WebSocket transparently and never buffers/caps it.
+#
+# ONLY the signaling channel rides this vhost. The media itself (ICE-TCP 7881) rides the
+# layer4 forward in ../Caddyfile, not this reverse_proxy — LiveKit advertises this node's
+# tailnet IP in ICE candidates (--node-ip) and browsers dial it directly. The app's
+# LIVEKIT_PUBLIC_URL (../harvester/config/harvester.env) points at this name.
+@livekit-harvester host livekit-harvester.staging.applepie.company
+handle @livekit-harvester {
+	reverse_proxy 127.0.0.1:17880
+}

@@ -1,0 +1,15 @@
+# caddy-config.volume — Quadlet named volume for Caddy's admin-API autosave config.
+#
+# THROWAWAY here (the real config is the read-only Caddyfile bind; this autosave is
+# unused): a bind-backed local volume pins it to a cache path instead of the tier's
+# precious/backed-up appdata store. Contrast caddy-data (ACME certs) which stays a plain
+# named volume and lands in the precious store automatically.
+#
+# The Device dir is created at deploy time by deploy.sh (rootless podman auto-creates NO
+# bind-mount source — a missing one fails the unit with "statfs: no such file or
+# directory"). Referenced from caddy.container as `Volume=caddy-config.volume:/config`.
+[Volume]
+Driver=local
+Type=none
+Device=/data/containers/applepie/cache/caddy-config
+Options=bind

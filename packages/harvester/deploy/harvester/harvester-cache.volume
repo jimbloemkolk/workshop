@@ -1,0 +1,18 @@
+# harvester-cache.volume — Quadlet named volume for the transcriber / Hugging Face
+# model cache (mounted at /root/.cache in harvester-app).
+#
+# THROWAWAY (multi-GB, re-downloaded on first use): opted OUT of the precious-by-default
+# @appdata volume store. A bind-backed local volume pins it to the @containers cache tier
+# (reproducible — NOT backed up / snapshotted) instead of following volume_path into
+# @appdata. The Device dir is created at deploy time by deploy.sh. See server-config's
+# homelab/quadlet/CLAUDE.md § volume placement for the full precious-vs-throwaway rule
+# this repo inherited from.
+#
+# The other two volumes (harvester-data — session recordings/transcripts, and
+# harvester-claude — the Claude Code login) are PRECIOUS, so they stay plain named
+# volumes (no .volume unit needed) and land in the backed-up @appdata store.
+[Volume]
+Driver=local
+Type=none
+Device=/data/containers/applepie/cache/harvester-cache
+Options=bind

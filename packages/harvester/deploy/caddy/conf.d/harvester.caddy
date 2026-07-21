@@ -1,0 +1,16 @@
+# Jesse's harvester fork — app (join links, API, socket.io). Host-matched inside the
+# wildcard *.staging.applepie.company block, so this fragment just host-matches and
+# proxies (the wildcard cert covers it). Backend (../harvester/) publishes on host
+# loopback 127.0.0.1:14747, forwarded into this container by applepie.pod's `-T,14747`
+# pasta entry. Backend stays private (loopback-only) — all access is through this TLS
+# vhost. Caddy upgrades WebSockets transparently, so the socket.io channel just works.
+#
+# HTTPS is load-bearing here: getUserMedia requires a secure context off-localhost, so
+# phones/browsers on the tailnet need this vhost, not a raw IP/port.
+# NOTE: only the app + LiveKit SIGNAL (livekit-harvester.caddy) go through Caddy — the
+# call MEDIA (ICE-TCP 7881) is forwarded via the layer4 block in ../Caddyfile, not proxied
+# here; browsers dial this node's tailnet IP directly (see ../harvester/README.md).
+@harvester host harvester.staging.applepie.company
+handle @harvester {
+	reverse_proxy 127.0.0.1:14747
+}

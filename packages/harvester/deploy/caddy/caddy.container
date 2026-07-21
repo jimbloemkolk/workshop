@@ -1,0 +1,38 @@
+[Unit]
+Description=Applepie caddy — Jesse's own ingress (tier: applepie)
+# The netns is useful the moment tailscaled (in dev-hub) runs in it; ordering after it
+# means caddy's first cert attempt already has connectivity semantics settled.
+After=network-online.target dev-hub.service
+Wants=network-online.target dev-hub.service
+
+[Container]
+# Built locally (caddy.build): xcaddy: caddy:2 + Cloudflare DNS + caddy-l4. Cloudflare
+# for the *.staging.applepie.company wildcard via DNS-01 (WAN inbound is dropped, so
+# HTTP-01 can never reach us); caddy-l4 for the raw-TCP forward of LiveKit's ICE-TCP
+# media port (see Caddyfile).
+Image=caddy.build
+ContainerName=caddy
+Pod=applepie.pod
+
+# NEW, distinct podman secret — NOT the homelab ingress's cf_api_token. Scoped to the
+# applepie.company Cloudflare zone (a wholly separate zone from jimbloemkolk.nl), so it
+# can never touch Jim's own DNS. See server-config's homelab/quadlet/applepie/dev-hub/
+# README.md § Security model (dev-hub itself — the tailnet machine + podman/systemd
+# access this pod rides on — is still deployed from server-config, not here).
+#   printf %s '<token>' | ssh applepie@lab 'XDG_RUNTIME_DIR=/run/user/$(id -u) podman secret create applepie-cf-api-token -'
+Secret=applepie-cf-api-token,type=env,target=CF_API_TOKEN
+
+# Config bind-mounted from the deploy rsync target; edited in git, redeployed.
+Volume=/data/apps/applepie/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+Volume=/data/apps/applepie/caddy/conf.d:/etc/caddy/conf.d:ro
+# ACME certs — PRECIOUS (avoids a re-issuance storm on restore), like ingress/caddy's
+# caddy-data.
+Volume=caddy-data:/data
+# Admin-API autosave — THROWAWAY (config comes from the read-only Caddyfile above).
+Volume=caddy-config.volume:/config
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

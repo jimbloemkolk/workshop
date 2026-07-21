@@ -1,0 +1,43 @@
+[Unit]
+Description=Harvester (applepie) — LiveKit SFU (tier: applepie)
+After=network-online.target harvester-redis.service
+Wants=network-online.target harvester-redis.service
+
+[Container]
+# PINNED, and coupled: livekit-server and the web app's livekit-client must move
+# TOGETHER. A too-old server fails browsers ONLY — a silent "negotiation timed out"
+# reconnect loop that the rtc-node e2e bots never see. Any bump here needs a real
+# two-browser retest, not just the e2e suite.
+Image=docker.io/livekit/livekit-server:v1.9
+ContainerName=harvester-livekit
+Network=harvester.network
+
+# livekit.yaml is RENDERED at start (ExecStartPre below) from the committed template
+# config/livekit.yaml.tpl + the podman secret store, onto the user's tmpfs runtime dir
+# — the API secret never sits in a committed file or on persistent disk.
+Volume=%t/harvester/livekit.yaml:/etc/livekit.yaml:ro
+
+# Signal (websocket) on the host LOOPBACK only — proxied by applepie's own caddy via its
+# pasta -T,17880 forward (../caddy/conf.d/livekit-harvester.caddy). NEW port vs. the
+# pods-experimental instance's 7880 — host-published ports are global, shared across
+# tiers, so Jim's still-running instance keeps its own.
+PublishPort=127.0.0.1:17880:7880
+# Media = ICE-TCP through applepie's own caddy: its layer4 forward is
+# applepie-node:7881 -> host loopback 27881 -> this port. Loopback-only. NEW port vs.
+# the pods-experimental instance's 17881, same reason as above.
+PublishPort=127.0.0.1:27881:7881
+
+# --node-ip: the address advertised in ICE candidates = the applepie node's (dev-hub's)
+# tailnet IP — the only address Jesse can reach; works for our own devices too.
+# HOW TO OBTAIN: server-config's homelab/quadlet/applepie/dev-hub/bootstrap.sh prints
+# it (dev-hub itself is still deployed from server-config, not here). It only changes
+# again if the node re-joins the tailnet from scratch (lost applepie-tailscale-state
+# volume).
+Exec=--config /etc/livekit.yaml --node-ip 100.108.156.126
+
+[Service]
+ExecStartPre=/usr/bin/bash /data/apps/applepie/harvester/render-config.sh
+Restart=always
+
+[Install]
+WantedBy=default.target

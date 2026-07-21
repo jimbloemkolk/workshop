@@ -1,0 +1,24 @@
+[Unit]
+Description=Build the harvester app image (backend/Dockerfile) for applepie
+# The Dockerfile's own steps (uv install, npm install -g, pnpm install) fetch from the
+# internet at build time.
+After=network-online.target
+Wants=network-online.target
+
+[Build]
+# Referenced by harvester-app.container as `Image=harvester-app.build`; Quadlet wires the
+# service to depend on this build, so a restart rebuilds first (podman's layer cache
+# keeps a no-op rebuild fast — only the copied source layers actually change between
+# deploys, so the pnpm-install/uv-sync/apt layers stay cached).
+#
+# SetWorkingDirectory is the SYNCED BUILD CONTEXT, not the deploy unit dir — the
+# Dockerfile's own header says "Build context is the REPO ROOT" (it COPYs the root
+# package.json/pnpm-lock.yaml/pnpm-workspace.yaml plus packages/harvester/** and
+# packages/transcriber/**), so deploy.sh syncs exactly that subset to this path
+# separately from the small deploy-unit sync. See ../README.md § Build context.
+ImageTag=localhost/applepie-harvester-app:latest
+SetWorkingDirectory=/data/apps/applepie/harvester-src
+File=packages/harvester/backend/Dockerfile
+
+[Install]
+WantedBy=default.target

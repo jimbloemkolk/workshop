@@ -1,0 +1,45 @@
+[Unit]
+Description=Harvester (applepie) — LiveKit egress recorder (tier: applepie)
+After=network-online.target harvester-redis.service harvester-livekit.service
+Wants=network-online.target harvester-redis.service harvester-livekit.service
+
+[Container]
+# Pinned in step with harvester-livekit.container (same release train — bump together).
+#
+# uid contract: this image runs as uid 1001 (gid 0) and CANNOT run as root (its
+# entrypoint starts pulseaudio). It records one Opus/Ogg file per published track into
+# the shared harvester-data volume, mounted at the SAME path as in the app container
+# (same-path contract). A named volume gets its ownership initialized from the image,
+# so no host chown/subuid ceremony is needed; the app side writes group-readable via
+# --umask=0002.
+Image=docker.io/livekit/egress:v1.9
+ContainerName=harvester-egress
+Network=harvester.network
+
+Environment=EGRESS_CONFIG_FILE=/etc/egress.yaml
+# Rendered at start from config/egress.yaml.tpl + the podman secret store — same
+# mechanism as harvester-livekit.container (see render-config.sh).
+Volume=%t/harvester/egress.yaml:/etc/egress.yaml:ro
+Volume=harvester-data:/srv/harvester/data
+
+# egress needs a large shm for its media pipelines
+PodmanArgs=--shm-size=1g
+
+[Service]
+# The shared data volume ends up holding the app's SQLite db (harvester.db at the
+# volume root), so the btrfs DB rule applies (server-config's homelab/quadlet/CLAUDE.md
+# § databases on btrfs):
+# mark the storage nodatacow BEFORE anything initialises in it. This lives HERE (not
+# on the app unit) because egress is deterministically the first mounter — the app is
+# After= this unit — and chattr must run while _data is still empty and owned by the
+# tier user (this image's init chowns it to subuid 1001, after which the tier user
+# gets "Operation not permitted"). Whole-volume +C: the recordings lose btrfs
+# checksums, which on a single disk are detect-only anyway; the nightly borg backup
+# covers them. Idempotent; same shape as pods/immich/immich-postgres.container.
+ExecStartPre=-/usr/bin/podman volume create harvester-data
+ExecStartPre=-/usr/bin/chattr +C /data/appdata/applepie/volumes/harvester-data/_data
+ExecStartPre=/usr/bin/bash /data/apps/applepie/harvester/render-config.sh
+Restart=always
+
+[Install]
+WantedBy=default.target

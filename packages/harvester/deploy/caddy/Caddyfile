@@ -1,0 +1,55 @@
+{
+	admin off
+	email jimbloemkolk@gmail.com
+
+	# Raw TCP forward for LiveKit ICE-TCP media (see ../harvester/README.md). Listens on
+	# 7881 in this pod's netns (reachable at the applepie node's tailnet IP); proxies to
+	# this netns's loopback 27881, which pasta -T forwards to the HOST loopback, where
+	# harvester-livekit's ICE-TCP forward publishes. A distinct loopback port because
+	# caddy itself owns :7881 here.
+	#
+	# MUST stay nested inside this single leading global-options block, not split into
+	# its own top-level block — Caddy only treats the FIRST address-less block as global
+	# options; a second standalone `layer4 { ... }` block gets parsed as an ordinary SITE
+	# block whose address is the literal word "layer4", and inside a site block `:7881`
+	# isn't a recognized directive ("unrecognized directive: :7881" — hit this live).
+	layer4 {
+		:7881 {
+			route {
+				proxy 127.0.0.1:27881
+			}
+		}
+	}
+}
+
+# ONE wildcard cert (*.staging.applepie.company) fronts every service Jesse deploys under
+# applepie. Per-app vhost fragments are synced into conf.d/ on deploy and imported HERE,
+# inside the wildcard block — so each fragment only host-matches and proxies; adding a
+# service needs NO new cert and NO DNS change. Same convention as ingress/caddy and the
+# old ingress/jesse-caddy.
+#
+# TLS: Let's Encrypt via DNS-01 (WAN inbound is dropped, so HTTP-01 can never reach us).
+# applepie.company is hosted at Cloudflare, so Caddy writes the
+# `_acme-challenge.staging.applepie.company` TXT straight into that zone via a scoped API
+# token (Zone:Read + DNS:Edit for applepie.company ONLY — a separate zone from
+# jimbloemkolk.nl, see server-config's homelab/quadlet/applepie/dev-hub/README.md §
+# Security model). Token injected as $CF_API_TOKEN by the unit's Secret=.
+#
+# Backends (Jesse's harvester fork) publish on the HOST loopback; this container's pasta
+# -T entries (applepie.pod) forward this netns's 127.0.0.1:PORT to the host's, so Caddy
+# reaches them at 127.0.0.1:PORT.
+*.staging.applepie.company {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN}
+		# Query a public resolver for the propagation self-check — don't make cert
+		# issuance depend on the box's own resolver chain.
+		resolvers 1.1.1.1 9.9.9.9
+	}
+
+	import /etc/caddy/conf.d/*.caddy
+
+	# Fallback for any subdomain the fragments above didn't claim.
+	handle {
+		respond "applepie: no service at this name" 404
+	}
+}

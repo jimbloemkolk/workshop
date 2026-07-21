@@ -1,0 +1,15 @@
+[Unit]
+Description=Build the Caddy+Cloudflare+layer4 image (xcaddy) for applepie's own ingress
+# xcaddy fetches Go modules from the internet at build time.
+After=network-online.target
+Wants=network-online.target
+
+[Build]
+# Referenced by caddy.container as `Image=caddy.build`; Quadlet wires the service to
+# depend on this build, so a restart builds first (layer cache makes no-op rebuilds fast).
+ImageTag=localhost/applepie-caddy:latest
+SetWorkingDirectory=/data/apps/applepie/caddy
+File=Containerfile
+
+[Install]
+WantedBy=default.target

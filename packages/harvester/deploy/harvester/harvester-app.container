@@ -1,0 +1,62 @@
+[Unit]
+Description=Harvester (applepie) — Insight Harvester backend + web app (tier: applepie)
+After=network-online.target harvester-livekit.service harvester-egress.service
+Wants=network-online.target harvester-livekit.service harvester-egress.service
+
+[Container]
+# Built locally, natively, ON THE BOX by harvester-app.build (Quadlet Build unit) — the
+# lab is x86_64 itself (same reason this always had to build there, not cross-build from
+# an Apple-Silicon Mac: the transcriber's torchcodec dependency ships no linux/aarch64
+# wheels), so a native build needs no --platform flag or emulation. No registry, no push
+# — deploy.sh syncs the build context (repo root subset backend/Dockerfile needs) and a
+# restart rebuilds via podman's layer cache. See ../README.md and harvester-app.build.
+Image=harvester-app.build
+ContainerName=harvester-app
+Network=harvester.network
+
+# Non-secret config (URLs, paths, the API-key NAME) from the deploy rsync target.
+# The secrets are NOT in that committed file — they ride the podman secret store:
+EnvironmentFile=/data/apps/applepie/harvester/config/harvester.env
+# Must match the key/secret pair rendered into livekit.yaml + egress.yaml
+# (render-config.sh reads the same secret store — one source of truth).
+Secret=harvester-livekit-api-secret,type=env,target=LIVEKIT_API_SECRET
+# Hugging Face token — diarization of local/import sessions.
+Secret=harvester-hf-token,type=env,target=HF_TOKEN
+
+# Session data (recordings, transcripts, events) — a PRECIOUS named volume (@appdata,
+# snapshotted/backed up), mounted at the SAME path as in harvester-egress.container
+# (the same-path contract). The egress recorder writes as uid 1001/gid 0, so the only
+# ceremony needed is a group-writable umask on this (container-root) side:
+Volume=harvester-data:/srv/harvester/data
+PodmanArgs=--umask=0002
+
+# Claude Code login state (Agent SDK auth for the harvest step) — PRECIOUS named
+# volume. Log in ONCE after first start:
+#   ssh applepie@lab ; XDG_RUNTIME_DIR=/run/user/$(id -u) podman exec -it harvester-app claude   -> /login
+Volume=harvester-claude:/root/.claude
+
+# Transcriber / Hugging Face model cache — THROWAWAY (re-downloaded on demand), opted
+# out of @appdata via the bind-backed .volume unit (see harvester-cache.volume).
+Volume=harvester-cache.volume:/root/.cache
+
+# Vault export target (harvested notes), bind-mounted at the SAME absolute path inside
+# the container (HARVESTER_VAULT_DIR in config/harvester.env points here) so paths in
+# exported notes are valid on the host too.
+Volume=/data/appdata/applepie/harvester/vault:/data/appdata/applepie/harvester/vault
+
+# Web/API on container :4747, published on the host LOOPBACK only; applepie's own caddy
+# reaches it via its pasta -T,14747 forward and proxies
+# harvester.staging.applepie.company -> 127.0.0.1:14747 (../caddy/conf.d/harvester.caddy).
+# NEW port vs. the pods-experimental instance's 4747 — host-published ports are global.
+PublishPort=127.0.0.1:14747:4747
+
+[Service]
+# NOTE: the app keeps a SQLite db (harvester.db) at the root of the data volume, so
+# the btrfs nodatacow rule applies — but the create+chattr ExecStartPre lives on
+# harvester-egress.container, NOT here: egress is deterministically the FIRST unit to
+# mount the volume (this unit is After= it), and +C must be set while _data is still
+# empty and tier-user-owned.
+Restart=always
+
+[Install]
+WantedBy=default.target

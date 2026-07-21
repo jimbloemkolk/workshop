@@ -1,0 +1,17 @@
+[Unit]
+Description=Harvester (applepie) — redis (LiveKit <-> egress message bus) (tier: applepie)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+# Exists solely as the LiveKit <-> egress message bus; nothing of ours reads or writes
+# it, it keeps no state worth keeping, and it is not published on the host.
+Image=docker.io/library/redis:7-alpine
+ContainerName=harvester-redis
+Network=harvester.network
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

@@ -9,6 +9,7 @@
 !packages/transcriber
 # prune junk inside the whitelisted trees: installed/derived files, and
 # .env files (HF_TOKEN, LiveKit secrets) that must never enter an image
+packages/harvester/deploy
 packages/harvester/**/node_modules
 packages/harvester/web/dist
 packages/transcriber/.venv

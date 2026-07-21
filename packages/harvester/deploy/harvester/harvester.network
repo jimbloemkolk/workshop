@@ -1,0 +1,15 @@
+[Unit]
+Description=Harvester (applepie) — private internal network (app <-> livekit <-> egress <-> redis)
+
+[Network]
+# A dedicated network so the harvester containers resolve each other by name
+# (aardvark-dns) — livekit.yaml.tpl, egress.yaml.tpl and config/harvester.env rely on
+# the ContainerName aliases (harvester-redis, harvester-livekit, harvester-app). Fully
+# independent from pods-experimental's own "harvester" network — rootless networks are
+# per-user, so same name, different tier, no collision.
+# Quadlet names the real network `systemd-harvester`; units reference it as
+# `Network=harvester.network`.
+NetworkName=harvester
+
+[Install]
+WantedBy=default.target
