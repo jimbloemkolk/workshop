@@ -88,6 +88,19 @@
 #                             (default: 0 — see "Images" above)
 #   DEPLOY_RESTART_ALL        set to 1 to restart every unit unconditionally, regardless
 #                             of what changed (default: 0 — see "Restarts" above)
+#   DEPLOY_SKIP_GIT_CHECK     set to 1 to skip the preflight git-state check below
+#                             (default: 0 — only for a deliberate one-off; the check
+#                             exists precisely so this doesn't need to be skipped)
+#
+# Preflight git check: this repo has no per-tier deploy lock, so whoever runs this
+# script deploys whatever's synced from THEIR working copy — the sync/build-context
+# steps below (sync_build_context, the per-stack rsync) read straight from REPO_ROOT,
+# not from a git ref. Two people (or two worktrees — see workshop's own
+# parallel-worktree setup) deploying at once with different local states would each
+# silently overwrite the other's in-flight deploy with whatever's on disk right now.
+# Requiring `main`, fully pushed, with nothing untracked/uncommitted means the thing
+# being synced always matches a specific commit that's visible to (and reproducible
+# by) everyone else on the tailnet, not a snapshot only the caller's machine has.
 #
 set -euo pipefail
 
@@ -110,6 +123,31 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mERR\033[0m %s\n' "$*" >&2; exit 1; }
+
+# --- preflight: git state (see the header comment on why) ------------------------
+check_git_state() {
+	[ "${DEPLOY_SKIP_GIT_CHECK:-0}" = 1 ] && return 0
+
+	local branch local_sha remote_sha dirty
+
+	branch="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)" \
+		|| die "$REPO_ROOT isn't a git checkout — can't verify what's being deployed"
+	[ "$branch" = main ] \
+		|| die "on branch '$branch', not main — switch to main before deploying (or DEPLOY_SKIP_GIT_CHECK=1 for a deliberate one-off)"
+
+	git -C "$REPO_ROOT" fetch origin main --quiet \
+		|| die "could not fetch origin/main — check network/auth before deploying"
+	local_sha="$(git -C "$REPO_ROOT" rev-parse main)"
+	remote_sha="$(git -C "$REPO_ROOT" rev-parse origin/main)"
+	[ "$local_sha" = "$remote_sha" ] \
+		|| die "main ($local_sha) != origin/main ($remote_sha) — push (or pull) before deploying, so everyone deploys the same commit"
+
+	dirty="$(git -C "$REPO_ROOT" status --porcelain)"
+	[ -z "$dirty" ] \
+		|| die "working tree has uncommitted/untracked changes — commit, stash, or clean them before deploying:
+$dirty"
+}
+check_git_state
 
 # List immediate subdirectory names of $1, one per line, sorted. Shell glob (not `find
 # -printf`, GNU-only) — macOS ships BSD find.
