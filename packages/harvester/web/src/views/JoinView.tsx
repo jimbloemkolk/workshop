@@ -5,6 +5,7 @@ import {
 } from 'livekit-client'
 import { api } from '../api'
 import { MarkButton, type MarkChannel } from '../components/MarkButton'
+import { getSettings } from '../settings'
 import { createCallSocket, type ServerEvent } from '../socket'
 import type { Socket } from 'socket.io-client'
 
@@ -282,6 +283,83 @@ function useLocalMicTrack(room: Room): MediaStreamTrack | null {
   return track
 }
 
+/** Only touch-capable devices actually auto-lock their screen on idle in a
+ * way that matters here — used to gate the wake-lock-failed warning so it
+ * never shows on desktop, where there's no screen-lock/mic-death failure
+ * mode to explain in the first place. Computed once; input capability
+ * doesn't change mid-session. */
+const IS_TOUCH_DEVICE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
+
+type WakeLockStatus = 'idle' | 'active' | 'unsupported' | 'failed'
+
+/** Screen Wake Lock: keeps the phone from auto-locking mid-call, which
+ * otherwise kills the microphone the instant the screen sleeps. Only ever
+ * prevents the *idle-timeout* lock — it's released the moment the tab is
+ * hidden and can't survive a manual power-button press, but that's exactly
+ * the failure mode this exists to fix, not a limitation to work around.
+ * Requested inside the Join click (a user gesture) via `active` flipping
+ * true; re-requested on visibilitychange→visible since backgrounding always
+ * releases it. iOS intermittently throws NotAllowedError on re-acquire for
+ * reasons outside app control, so each attempt gets one retry before giving
+ * up — `status` only ever settles into 'failed' once both attempts are
+ * spent, so callers can distinguish "still trying" from "truly can't" and
+ * avoid flashing a warning during the first, usually-successful attempt. */
+function useWakeLock(active: boolean): WakeLockStatus {
+  const [status, setStatus] = useState<WakeLockStatus>('idle')
+  const sentinelRef = useRef<WakeLockSentinel | null>(null)
+
+  useEffect(() => {
+    if (!active) { setStatus('idle'); return }
+    if (!navigator.wakeLock) { setStatus('unsupported'); return }
+    let cancelled = false
+
+    const acquire = async (retriesLeft: number): Promise<void> => {
+      try {
+        const sentinel = await navigator.wakeLock.request('screen')
+        if (cancelled) { void sentinel.release(); return }
+        sentinelRef.current = sentinel
+        setStatus('active')
+        sentinel.addEventListener('release', () => {
+          if (sentinelRef.current === sentinel) sentinelRef.current = null
+        })
+      } catch {
+        if (cancelled) return
+        if (retriesLeft > 0) await acquire(retriesLeft - 1)
+        else setStatus('failed')
+      }
+    }
+    void acquire(1)
+
+    const onVisible = () => {
+      // The lock auto-releases (clearing sentinelRef via the 'release'
+      // listener above) the moment the tab hides, so re-acquiring
+      // unconditionally on every visible transition can't double-acquire.
+      if (document.visibilityState === 'visible') void acquire(1)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', onVisible)
+      const s = sentinelRef.current
+      sentinelRef.current = null
+      if (s) void s.release()
+    }
+  }, [active])
+
+  return status
+}
+
+/** WebKit-only, feature-detected, no ambient lib changes — a plain local
+ * cast rather than augmenting the global Navigator type. Pure routing
+ * polish (correct earpiece/speaker + ducking on iOS); does nothing for
+ * background survival, so it's set-and-forget once per call, unlike the
+ * wake lock which needs the full re-acquire dance above. */
+function setPlayAndRecordAudioSession(): void {
+  const nav = navigator as Navigator & { audioSession?: { type: string } }
+  try { if (nav.audioSession) nav.audioSession.type = 'play-and-record' } catch { /* ignore */ }
+}
+
 const WAVEFORM_FFT_SIZE = 2048
 
 /** Oscilloscope-style waveform, the technique borrowed from the
@@ -349,6 +427,14 @@ function InCall({ room, sessionId, token, title, initialSpeakerId, onEnded, onEr
   const [speakerId, setSpeakerId] = useState(initialSpeakerId)
   const [micId, setMicId] = useState('')
   const micTrack = useLocalMicTrack(room)
+  const connected = connection === ConnectionState.Connected
+  // No settings UI edits this yet, so it's static for the life of the call —
+  // read once rather than subscribing to storage changes.
+  const [keepScreenOn] = useState(() => getSettings().keepScreenOn)
+  const wakeLockStatus = useWakeLock(connected && keepScreenOn)
+  // Routing polish only (earpiece/speaker + ducking on iOS) — set once, not
+  // worth re-running on every reconnect blip the way the wake lock is.
+  useEffect(() => { setPlayAndRecordAudioSession() }, [])
   const audioDiv = useRef<HTMLDivElement>(null)
   const socketRef = useRef<Socket | null>(null)
   // marks made while the socket is down: queued with local epoch time and
@@ -546,11 +632,16 @@ function InCall({ room, sessionId, token, title, initialSpeakerId, onEnded, onEr
     return p?.name || id
   })
 
-  const connected = connection === ConnectionState.Connected
   const stateLabel = !connected ? connection
     : markingNames.length > 0 ? `${markingNames.join(' & ')} is marking…`
     : others.length > 0 ? `in call with ${others.join(', ')}`
     : 'waiting for the other person to join…'
+
+  // Only worth mentioning when it actually matters: the setting is on, the
+  // device looks like one that auto-locks its screen, and acquisition has
+  // definitively failed (not merely still in flight) — see useWakeLock.
+  const showWakeLockWarning = keepScreenOn && IS_TOUCH_DEVICE &&
+    (wakeLockStatus === 'unsupported' || wakeLockStatus === 'failed')
 
   return (
     <JoinShell title={title}>
@@ -575,6 +666,9 @@ function InCall({ room, sessionId, token, title, initialSpeakerId, onEnded, onEr
         {/* your own mic waveform — the only way to tell you're audible to
             the other side without asking them */}
         <Waveform track={muted ? null : micTrack} />
+        {showWakeLockWarning && (
+          <p className="muted hint">keep your screen on — locking it will cut your microphone</p>
+        )}
         <div className="row call-controls">
           <button className={muted ? 'danger' : ''} onClick={toggleMute}>
             {muted ? '🔇 Unmute' : '🎙 Mute'}
