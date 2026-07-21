@@ -1,0 +1,15 @@
+# dashboard-data.volume — Quadlet named volume for the dashboard's local jsonl health-
+# check history cache (mounted at /var/lib/dashboard in dashboard.container).
+#
+# THROWAWAY (re-derivable — HEALTH_TARGETS just gets re-polled from scratch on a fresh
+# volume, losing only the rolling ~14-day backlog): a bind-backed local volume pins it
+# to the @containers cache tier (reproducible — NOT backed up/snapshotted) instead of
+# following volume_path into the precious-by-default @appdata store. Same idiom as
+# harvester-cache.volume/caddy-config.volume. The Device dir is created at deploy time
+# by deploy.sh (rootless podman auto-creates NO bind-mount source — a missing one fails
+# the unit with "statfs: no such file or directory").
+[Volume]
+Driver=local
+Type=none
+Device=/data/containers/applepie/cache/dashboard-data
+Options=bind

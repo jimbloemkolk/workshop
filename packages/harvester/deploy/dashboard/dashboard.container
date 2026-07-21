@@ -1,0 +1,77 @@
+[Unit]
+Description=Applepie dashboard — ops-monitoring UI for the applepie staging box (tier: applepie)
+After=network-online.target harvester-app.service
+Wants=network-online.target
+
+[Container]
+# Built locally, natively (dashboard.build) — no registry, no push, same as
+# harvester-app. The image itself is deliberately tiny (no ffmpeg/uv/claude — see
+# packages/dashboard/Dockerfile), so a cold rebuild is seconds, not minutes.
+Image=dashboard.build
+ContainerName=dashboard
+# Same network as harvester-app so it can resolve http://harvester-app:4747 by
+# container name (aardvark-dns) — see ../harvester/harvester.network. A bridge network
+# AND a host-loopback PublishPort below is the exact pattern harvester-app itself uses,
+# not a new one invented for this stack.
+Network=harvester.network
+
+# Non-secret config — every value below is read by a collector that degrades to null/
+# n/a if the source is missing (see packages/dashboard/src/config.ts), so nothing here
+# is load-bearing enough to need a podman secret; there IS no secret this dashboard
+# needs (read-only, no credentials of its own).
+Environment=DASH_PORT=5151
+Environment=HARVESTER_API=http://harvester-app:4747
+# JSON values must be single-quoted as a whole: systemd's Environment= parsing
+# otherwise strips the inner double quotes and splits on the space in
+# "harvester data", mangling the podman run args (hit live on first deploy).
+Environment=HEALTH_TARGETS='[{"name":"harvester","url":"http://harvester-app:4747/api/sessions"}]'
+# Same two dirs harvester-app.container itself mounts (session data + vault) — read
+# HERE via the broad :ro bind below, not a second copy of the volume.
+Environment=STORAGE_DIRS='[{"name":"harvester data","path":"/data/appdata/applepie/volumes/harvester-data/_data"},{"name":"vault","path":"/data/appdata/applepie/harvester/vault"}]'
+Environment=DISK_PATH=/data/appdata/applepie
+# caddy's ACME store (caddy-data volume) keeps its certs under caddy/certificates/<ACME
+# dir>/<name>/*.crt — found by sshing in and walking caddy-data.volume's _data dir; see
+# ../README.md § Dashboard for how that was confirmed.
+Environment=CERT_DIR=/data/appdata/applepie/volumes/caddy-data/_data/caddy/certificates
+# deploy.sh appends one line here per deploy (see its own "deploy metrics" comment) —
+# this dashboard only ever reads it (see collectors/deploys.ts's own header).
+Environment=DEPLOY_LOG=/data/appdata/applepie/dashboard-metrics/deploys.jsonl
+Environment=DASH_DATA_DIR=/var/lib/dashboard
+Environment=PODMAN_SOCK=/run/podman/podman.sock
+
+# Podman REST API, READ-ONLY: this dashboard only ever GETs .../containers/json (see
+# collectors/podman.ts) — it never creates/stops anything, so :ro is correct and
+# strictly tighter than dev-hub.container's own (read-write) mount of the very same
+# socket. Same %t idiom dev-hub.container uses (%t = this [applepie tier] user's own
+# XDG runtime dir, i.e. /run/user/<uid>); podman.socket is already enabled by dev-hub's
+# own ExecStartPre, so nothing extra is needed here for the socket to exist.
+Volume=%t/podman/podman.sock:/run/podman/podman.sock:ro
+
+# The tier's real data, READ-ONLY — covers everything above at once: STORAGE_DIRS
+# (harvester-data, vault), CERT_DIR (caddy-data's certificates/) and DEPLOY_LOG
+# (dashboard-metrics/). One broad bind rather than three narrow ones — same "whole tier
+# root, not one path at a time" reasoning as dev-hub.container's own
+# /data/appdata/applepie mount, so a future STORAGE_DIRS entry needs no unit edit.
+# Deliberately :ro: this dashboard has no business writing into another stack's data
+# (deploy.sh itself, over SSH on the host, is what appends to DEPLOY_LOG — never this
+# container).
+Volume=/data/appdata/applepie:/data/appdata/applepie:ro
+
+# Health-check jsonl history — THROWAWAY (re-derivable: HEALTH_TARGETS just gets
+# re-polled from scratch, losing only the rolling 14-day backlog on a fresh volume).
+# Bind-backed local volume, same idiom as harvester-cache.volume/caddy-config.volume —
+# opts OUT of the precious-by-default @appdata store.
+Volume=dashboard-data.volume:/var/lib/dashboard
+
+# UI + API on container :5151, published on host LOOPBACK only — applepie's own caddy
+# will reach it via a pasta -T,15151 forward (not added to applepie.pod as of this
+# commit — see ../README.md § Dashboard) and proxy dashboard.staging.applepie.company ->
+# 127.0.0.1:15151 (../caddy/conf.d/dashboard.caddy). Same +10000 offset convention as
+# harvester-app (4747 container / 14747 host): 5151 container / 15151 host.
+PublishPort=127.0.0.1:15151:5151
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

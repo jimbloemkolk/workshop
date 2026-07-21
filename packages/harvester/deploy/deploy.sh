@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# deploy.sh — push applepie stacks (caddy, harvester) to the homelab box over SSH, via
+# deploy.sh — push applepie stacks (caddy, harvester, dashboard) to the homelab box over SSH, via
 # Jesse's actual reachable entry point: Tailscale SSH into dev-hub (root@applepie.<tailnet
 # domain>.ts.net) — the same path works for anyone on the tailnet, not just Jim, since
 # it's a share/tailnet grant rather than a host-level account. Scoped-down cousin of
@@ -17,23 +17,28 @@
 # and (unlike a raw host login) `id -u` inside dev-hub would report 0 (its own userns
 # root), which is the WRONG uid for computing /run/user/<uid> paths against the real host.
 #
-# Per (stack) in {caddy, harvester}:
+# Per (stack) in {caddy, harvester, dashboard}:
 #   rsync deploy/<stack>/  ->  applepie@box:/data/apps/applepie/<stack>/ (bind-mounted
 #     into dev-hub at the identical path — see dev-hub.container)
 #   copy unit files -> /home/applepie/.config/containers/systemd/ (also bind-mounted;
 #     NOT $HOME-relative, since $HOME for root-in-dev-hub is /root, not /home/applepie)
 #   systemctl --user daemon-reload ; restart each container/pod/build unit
 #
-# harvester ALSO gets a second, bigger sync: harvester-app.build's Dockerfile needs the
-# repo root as build context (root manifests + packages/harvester + packages/transcriber
-# — see harvester-app.build's own comment), so that subset is synced separately to
-# /data/apps/applepie/harvester-src/ before the restart. Built NATIVELY on the box (x86_64
-# lab, x86_64-only Dockerfile) — no registry, no push.
+# harvester AND dashboard ALSO get a second, bigger sync, and SHARE it: both
+# harvester-app.build's and dashboard.build's Dockerfiles need the repo root as build
+# context (root manifests + packages/harvester + packages/transcriber + packages/
+# dashboard — see each *.build's own comment), so that combined subset is synced to the
+# same /data/apps/applepie/harvester-src/ tree before either restarts (see
+# sync_build_context). Built NATIVELY on the box (x86_64 lab, x86_64-only Dockerfiles) —
+# no registry, no push. Sharing one synced dir between two independently-built images
+# means their build-context-hash restart markers must be scoped to each image's own
+# inputs, not the whole shared dir — see context_hash/mark_if_changed's own comments.
 #
 # Usage:
-#   ./deploy.sh                  # both stacks
+#   ./deploy.sh                  # every stack
 #   ./deploy.sh caddy            # one stack
 #   ./deploy.sh caddy harvester
+#   ./deploy.sh dashboard
 #
 # Secrets: each stack declares what it needs via `Secret=<name>,...` in its *.container
 # units. Before restarting, deploy.sh reads those names, checks the applepie tier's
@@ -49,7 +54,8 @@
 # Restarts: a *.container/*.pod unit only restarts if (a) its own unit file's content
 # actually changed this deploy — the previously-installed copy in $QDIR is diffed
 # against the incoming one before being overwritten — or (b) it's backed by a *.build
-# (harvester-app.container, caddy.container) whose synced BUILD CONTEXT hash changed
+# (harvester-app.container, caddy.container, dashboard.container) whose synced BUILD
+# CONTEXT hash changed
 # since the last deploy (a marker under .deploy-state/ on the box; see
 # context_hash/mark_if_changed). That's a build-context hash, not a
 # `podman image inspect` image-ID diff, deliberately: restarting a unit also
@@ -64,6 +70,15 @@
 # deploy no longer bounces harvester-livekit/egress/redis (or drops an active call)
 # just because their unchanged unit files got re-synced. DEPLOY_RESTART_ALL=1
 # restores the old restart-everything-unconditionally behavior.
+#
+# Deploy metrics: this script is the dashboard stack's OWN first data source. Each run
+# times its three phases (sync, build, apply) via plain $SECONDS deltas and, after the
+# remote apply finishes, appends ONE jsonl line to
+# /data/appdata/applepie/dashboard-metrics/deploys.jsonl (over the same SSH connection,
+# `mkdir -p` first) in exactly the shape packages/dashboard/src/collectors/deploys.ts
+# parses — see write_deploy_metrics. Best-effort: a failed metrics write only warns,
+# same as a failed image pull above, since this script's job is deploying stacks, not
+# feeding its own dashboard.
 #
 # Env:
 #   HOMELAB_HOST              ssh host/alias of dev-hub (default: applepie.diplodocus-decibel.ts.net)
@@ -197,6 +212,53 @@ pull_images() {  # stack...
 		done'
 }
 
+# --- deploy metrics (this dashboard's own food) -----------------------------------
+# Hand-rolled, not jq (nothing else in this script needs it): every value going into
+# the JSON below is either a controlled literal (numbers, hardcoded keys) or run
+# through json_escape, so no dependency worth adding for two characters of escaping.
+json_escape() {  # raw
+	printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+json_array() {  # item...
+	local out='[' first=1 item
+	for item in "$@"; do
+		[ "$first" = 1 ] || out+=','
+		out+="\"$(json_escape "$item")\""
+		first=0
+	done
+	printf '%s]' "$out"
+}
+
+# Appends ONE jsonl line to DEPLOY_LOG (packages/dashboard's own config) after a
+# successful apply, in EXACTLY the shape packages/dashboard/src/collectors/deploys.ts's
+# isDeployRecord() requires — a field renamed/dropped here silently drops the line on
+# the dashboard side (tolerant parsing, not a crash, but the point is still to feed it
+# real data). imageId is omitted (null) for now — nothing upstream of this script
+# currently surfaces a stable one worth recording (see build_live's own comment on why
+# an image-ID diff taken around ITS build isn't meaningful here). Piped over the SSH
+# connection's stdin rather than embedded in the remote command string — the JSON body
+# contains double quotes, and a git branch name is technically allowed to contain a
+# single quote, so building `ssh ... "... '$line' ..."` would be one bad branch name
+# away from breaking the remote command's own quoting.
+write_deploy_metrics() {  # sync_s  build_s  apply_s  total_s  [restarted_service...]
+	local sync_s="$1" build_s="$2" apply_s="$3" total_s="$4"
+	shift 4
+	# NB: appdata (data-land, host-shared, mounted ro into dashboard.container as
+	# DEPLOY_LOG's dir), NOT $APPS_DIR — apps/ is rsync-managed deploy-artifact land.
+	local ts sha branch stacks_json restarted_json line log_dir="/data/appdata/$TIER/dashboard-metrics"
+	ts="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+	sha="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+	branch="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+	stacks_json="$(json_array "${stacks[@]}")"
+	restarted_json="$(json_array "$@")"
+	line="$(printf '{"ts":"%s","stacks":%s,"gitSha":"%s","branch":"%s","durations":{"sync_s":%s,"build_s":%s,"apply_s":%s,"total_s":%s},"imageId":null,"restarted":%s}' \
+		"$ts" "$stacks_json" "$(json_escape "$sha")" "$(json_escape "$branch")" \
+		"$sync_s" "$build_s" "$apply_s" "$total_s" "$restarted_json")"
+	printf '%s\n' "$line" | ssh "$TARGET" "mkdir -p '$log_dir' && cat >> '$log_dir/deploys.jsonl'" \
+		|| echo "  !! could not write deploy metrics for this run (dashboard's history will be missing it)" >&2
+}
+
 # --- live build output ------------------------------------------------------------
 # `systemctl --user restart` triggers a unit's Build dependency but doesn't stream its
 # log anywhere useful — the build happens, but silently as far as this script's caller
@@ -226,25 +288,34 @@ build_live() {  # image_tag  workdir  containerfile
 # staging test still force a restart every time. Hashing the already-synced ON-DISK
 # build context instead sidesteps the whole problem: it's the exact same directory
 # tree either builder reads from, so it doesn't matter which one actually builds.
-context_hash() {  # dir
-	ssh "$TARGET" "cd '$1' 2>/dev/null && find . -type f | LC_ALL=C sort | xargs -r sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1"
+#
+# $2 optionally narrows the hash to specific paths RELATIVE TO $1 (space-separated,
+# word-split remotely — every caller passes hardcoded literal paths, never anything
+# derived from user input, so that's safe) instead of the whole tree ("." if omitted).
+# This is what lets harvester-app and dashboard share ONE synced directory
+# (harvester-src/) while each restarts only for ITS OWN inputs — see mark_if_changed's
+# call sites in the build loop below for why that separation matters.
+context_hash() {  # dir  [subpaths="."]
+	local dir="$1" subpaths="${2:-.}"
+	ssh "$TARGET" "cd '$dir' 2>/dev/null && find $subpaths -type f 2>/dev/null | LC_ALL=C sort | xargs -r sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1"
 }
 
-# Hashes $1 (a build context already synced onto the box) and compares it against
-# the marker left by the last deploy of $3 — stored under a dedicated state dir
-# that no stack's own `rsync --delete` can ever reach, so it survives across
-# deploys untouched by anything else. Appends $2 (systemd service name) to the
-# global force_restart array when the hash changed, or there was no prior marker
-# (first-ever deploy of this stack) — then updates the marker for next time.
-mark_if_changed() {  # dir  service_name  label
+# Hashes $1 (a build context already synced onto the box), scoped to $4's subpaths if
+# given, and compares it against the marker left by the last deploy of $3 — stored
+# under a dedicated state dir that no stack's own `rsync --delete` can ever reach, so
+# it survives across deploys untouched by anything else. Appends $2 (systemd service
+# name) to the global force_restart array when the hash changed, or there was no
+# prior marker (first-ever deploy of this stack) — then updates the marker for next
+# time.
+mark_if_changed() {  # dir  service_name  label  [subpaths]
 	# NOTE: `marker` deliberately isn't assigned inline here alongside dir/svc/label —
 	# under `set -u`, a `local a=1 b="$a"` on the same line raises "a: unbound
 	# variable" (bash expands all the assignments' right-hand sides before any of
 	# that local statement's declarations actually take effect), so a var that
 	# depends on an earlier one in the same call needs its own statement below.
-	local dir="$1" svc="$2" label="$3" cur prev marker
+	local dir="$1" svc="$2" label="$3" subpaths="${4:-.}" cur prev marker
 	marker="$APPS_DIR/$TIER/.deploy-state/$label.hash"
-	cur="$(context_hash "$dir")"
+	cur="$(context_hash "$dir" "$subpaths")"
 	prev="$(ssh "$TARGET" "cat '$marker' 2>/dev/null" || true)"
 	if [ "$cur" != "$prev" ]; then
 		force_restart+=("$svc")
@@ -253,14 +324,27 @@ mark_if_changed() {  # dir  service_name  label
 		|| echo "  !! could not persist build-context marker for $label (next deploy may over-restart)" >&2
 }
 
-# --- harvester-app.build's build context (repo root subset) ----------------------
-# Separate from the small per-stack sync below: the Dockerfile's context is the repo
-# root, not deploy/harvester/. Three plain rsyncs (not one clever include/exclude
-# filter) — simpler to get right, and macOS's ancient bundled rsync doesn't reliably
-# support `**` glob excludes, so every pattern here is a plain basename match.
+# --- harvester-app.build's AND dashboard.build's shared build context (repo root
+# subset) -------------------------------------------------------------------------
+# Separate from the small per-stack sync below: both Dockerfiles' context is the repo
+# root, not deploy/harvester/ or deploy/dashboard/. Four plain rsyncs (not one clever
+# include/exclude filter) — simpler to get right, and macOS's ancient bundled rsync
+# doesn't reliably support `**` glob excludes, so every pattern here is a plain
+# basename match.
+#
+# Called from BOTH the harvester) and dashboard) build-loop cases below, so it guards
+# against running twice in a single `./deploy.sh harvester dashboard` invocation
+# (harmless either way — rsync is idempotent — but doubling an already-slow full-tree
+# sync for no reason is silly). This is exactly why the two stacks' restart decisions
+# can't just hash "the harvester-src dir" as a whole: see context_hash's own comment
+# and the harvester)/dashboard) cases' scoped mark_if_changed calls.
 sync_build_context() {
+	if [ "${context_synced:-0}" = 1 ]; then
+		return 0
+	fi
+	context_synced=1
 	local dst="$APPS_DIR/$TIER/harvester-src"
-	log "Syncing harvester-app.build's context (repo root subset) …"
+	log "Syncing harvester-app.build's + dashboard.build's shared context (repo root subset) …"
 	ssh "$TARGET" "mkdir -p '$dst/packages'"
 	rsync -az \
 		"$REPO_ROOT/package.json" "$REPO_ROOT/pnpm-lock.yaml" "$REPO_ROOT/pnpm-workspace.yaml" \
@@ -274,6 +358,10 @@ sync_build_context() {
 		--exclude=.venv --exclude=__pycache__ --exclude=.env --exclude='*.log' \
 		"$REPO_ROOT/packages/transcriber/" "$TARGET:$dst/packages/transcriber/" \
 		|| die "sync of packages/transcriber failed"
+	rsync -az --delete \
+		--exclude=node_modules --exclude=data --exclude=.env --exclude='*.log' \
+		"$REPO_ROOT/packages/dashboard/" "$TARGET:$dst/packages/dashboard/" \
+		|| die "sync of packages/dashboard failed"
 }
 
 # --- build the stack work list from args -----------------------------------------
@@ -293,14 +381,23 @@ log "Tier $TIER  (ssh $TARGET)  stacks: ${stacks[*]}"
 ssh "$TARGET" "mkdir -p '$QDIR'" \
 	|| die "cannot reach $TARGET — is dev-hub deployed and sharable (server-config's homelab/quadlet/applepie/dev-hub/)?"
 
+# Phase timing (deploy metrics — see write_deploy_metrics) starts here: sync_s covers
+# just this small per-stack unit-file rsync. The bigger repo-root sync
+# (sync_build_context, shared by harvester/dashboard) is timed as part of build_s
+# instead — it's prep work for a build, not this per-unit deploy sync, and keeping it
+# there means these two timers stay two clean, uninterrupted blocks rather than
+# scattered partial sums across the interleaved case statement below.
+SECONDS=0
 for stack in "${stacks[@]}"; do
 	rsync -az --delete "$SCRIPT_DIR/$stack/" "$TARGET:$APPS_DIR/$TIER/$stack/" \
 		|| die "rsync $stack failed — is $APPS_DIR/$TIER user-owned?"
 done
+sync_s=$SECONDS
 
 # Trigger each deployed stack's build LIVE, so the terminal actually shows progress.
 # force_restart collects the systemd service names mark_if_changed decides actually
 # need a restart (their build context's hash changed) — see its own comment.
+SECONDS=0
 declare -a force_restart=()
 for stack in "${stacks[@]}"; do
 	case "$stack" in
@@ -310,12 +407,29 @@ for stack in "${stacks[@]}"; do
 			;;
 		harvester)
 			sync_build_context
-			mark_if_changed "$APPS_DIR/$TIER/harvester-src" harvester-app.service harvester-app
+			# Scoped to what backend/Dockerfile actually COPYs — deliberately EXCLUDES
+			# packages/dashboard, even though it now lives in this same synced
+			# harvester-src/ tree, so a dashboard-only change never force-restarts
+			# harvester-app. See context_hash's own comment.
+			mark_if_changed "$APPS_DIR/$TIER/harvester-src" harvester-app.service harvester-app \
+				"package.json pnpm-lock.yaml pnpm-workspace.yaml packages/harvester packages/transcriber"
 			build_live localhost/applepie-harvester-app:latest \
 				"$APPS_DIR/$TIER/harvester-src" packages/harvester/backend/Dockerfile
 			;;
+		dashboard)
+			sync_build_context
+			# Scoped to what packages/dashboard/Dockerfile actually COPYs — EXCLUDES
+			# packages/harvester and packages/transcriber, so an app-only deploy never
+			# force-restarts this stack (the whole point of Phase 2's wiring: dashboard
+			# and harvester-app share one synced dir but restart fully independently).
+			mark_if_changed "$APPS_DIR/$TIER/harvester-src" dashboard.service dashboard \
+				"package.json pnpm-lock.yaml pnpm-workspace.yaml packages/dashboard"
+			build_live localhost/applepie-dashboard:latest \
+				"$APPS_DIR/$TIER/harvester-src" packages/dashboard/Dockerfile
+			;;
 	esac
 done
+build_s=$SECONDS
 
 # Join force_restart into a single CSV positional arg for the remote script below (a
 # count-prefixed variadic scheme would work too, but this is simpler to get right
@@ -326,11 +440,20 @@ if ((${#force_restart[@]})); then
 	force_restart_csv="${force_restart_csv%,}"
 fi
 
+SECONDS=0
 provision_secrets "${stacks[@]}"
 pull_images "${stacks[@]}"
 
 # Apply on the host, as the applepie user (via dev-hub's bind-mounted CONTAINER_HOST /
 # DBUS_SESSION_BUS_ADDRESS — no XDG_RUNTIME_DIR export needed here, see header).
+#
+# Piped through tee (not just streamed straight to the terminal) so the RESTARTED:
+# trailer line the remote script prints (see the heredoc's own comment) can be
+# recovered afterward for the deploy-metrics line below — `tee` preserves the live
+# streaming this had before, `pipefail` (set at the top of this script) keeps the
+# pipeline's exit status equal to ssh's own, not tee's, so a remote restart failure
+# still aborts this script exactly as it did before this pipe was introduced.
+apply_log="$(mktemp)"
 # ssh joins its arguments with SPACES, unquoted, into one remote command string — an
 # empty "$force_restart_csv" would simply vanish, shifting every later positional arg
 # left by one and leaving the remote script's stack list empty (hit live: a deploy with
@@ -338,7 +461,7 @@ pull_images "${stacks[@]}"
 # printf %q re-quotes each arg so the remote bash reparses them exactly as passed —
 # an empty string survives as ''.
 ssh "$TARGET" "bash -s -- $(printf '%q ' "$APPS_DIR/$TIER" "$QDIR" "${DEPLOY_RESTART_ALL:-0}" \
-	"$force_restart_csv" "${stacks[@]}")" <<'REMOTE'
+	"$force_restart_csv" "${stacks[@]}")" <<'REMOTE' | tee "$apply_log"
 set -euo pipefail
 apps_root="$1"; shift
 QDIR="$1"; shift
@@ -410,6 +533,7 @@ systemctl --user daemon-reload
 # unit type: foo.container -> foo.service, foo.pod -> foo-POD.service.
 rc=0
 any=0
+restarted_list=()
 for stack in "${deployed[@]}"; do
 	src="$apps_root/$stack"
 	for unit in "$src"/*.container "$src"/*.pod; do
@@ -425,13 +549,56 @@ for stack in "${deployed[@]}"; do
 		is_listed "$svc" "$force_units" && restart=1
 		[[ "$restart" = 1 ]] || continue
 		echo "  ~ restart $svc"
-		systemctl --user restart "$svc" \
-			|| { echo "  !! $svc failed — see: journalctl --user -u $svc" >&2; rc=1; }
+		# Only counted as "restarted" (for the deploy-metrics line below) on SUCCESS —
+		# a failed restart isn't something the dashboard should report as if the new
+		# version is now running.
+		if systemctl --user restart "$svc"; then
+			restarted_list+=("$svc")
+		else
+			echo "  !! $svc failed — see: journalctl --user -u $svc" >&2
+			rc=1
+		fi
 		any=1
 	done
 done
 [[ "$any" = 1 ]] || echo "  (nothing to restart — no unit files or images changed)"
+# Trailer line the LOCAL script greps back out of this SSH command's (tee'd) output to
+# learn what actually got restarted, for the deploy-metrics jsonl line — see
+# write_deploy_metrics. Emitted unconditionally (even when restarted_list is empty) so
+# the local sed always has exactly one line to find.
+printf 'RESTARTED:%s\n' "$(IFS=,; echo "${restarted_list[*]:-}")"
 exit $rc
 REMOTE
+apply_s=$SECONDS
+total_s=$((sync_s + build_s + apply_s))
+
+# Recover the remote script's RESTARTED: trailer (last such line, in case anything
+# upstream ever echoes a line matching that prefix) and turn it back into short,
+# UI-friendly service names (drop the .service/-pod suffix Quadlet added) for the
+# deploy-metrics line.
+restarted_csv="$(sed -n 's/^RESTARTED://p' "$apply_log" | tail -n1)"
+rm -f "$apply_log"
+declare -a restarted_short=()
+if [ -n "$restarted_csv" ]; then
+	IFS=',' read -r -a restarted_raw <<<"$restarted_csv"
+	for svc in "${restarted_raw[@]}"; do
+		short="${svc%.service}"
+		short="${short%-pod}"
+		restarted_short+=("$short")
+	done
+fi
+
+log "Timings: sync ${sync_s}s, build ${build_s}s, apply ${apply_s}s (total ${total_s}s)"
+# NOTE: guarded, not a bare `"${restarted_short[@]}"` — on bash 3.2 (macOS's shipped
+# /bin/bash, still what `env bash` resolves to on a stock Mac), `set -u` treats
+# expanding an EMPTY array variable (as opposed to empty positional params, which are
+# fine — see json_array/write_deploy_metrics's own use of "$@") as an unbound-variable
+# error. Same reason force_restart_csv above is only built inside its own
+# `((${#force_restart[@]}))` guard rather than expanded unconditionally.
+if ((${#restarted_short[@]})); then
+	write_deploy_metrics "$sync_s" "$build_s" "$apply_s" "$total_s" "${restarted_short[@]}"
+else
+	write_deploy_metrics "$sync_s" "$build_s" "$apply_s" "$total_s"
+fi
 
 log "Deploy complete."

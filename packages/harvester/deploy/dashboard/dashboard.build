@@ -1,0 +1,24 @@
+[Unit]
+Description=Build the applepie dashboard image (packages/dashboard/Dockerfile) for applepie
+# No external fetches at build time worth naming individually (just the pnpm store for
+# fastify/@fastify/static/tsx/typescript) — see the Dockerfile's own header for why this
+# image is deliberately tiny next to harvester-app.build's.
+After=network-online.target
+Wants=network-online.target
+
+[Build]
+# Referenced by dashboard.container as `Image=dashboard.build`; same shape as
+# harvester-app.build — SetWorkingDirectory is the SYNCED BUILD CONTEXT (repo root
+# subset), not this deploy unit dir. It shares that context dir with harvester-app.build:
+# deploy.sh's sync_build_context() syncs packages/harvester, packages/transcriber AND
+# packages/dashboard (plus the root manifests) into the same harvester-src/ tree, since
+# packages/dashboard/Dockerfile's context is likewise "repo root subset", not just its
+# own package dir. See deploy.sh's context_hash()/mark_if_changed() comments for how the
+# two builds' restart decisions stay independent despite sharing one synced directory —
+# a harvester-only source change must not force a dashboard restart, and vice versa.
+ImageTag=localhost/applepie-dashboard:latest
+SetWorkingDirectory=/data/apps/applepie/harvester-src
+File=packages/dashboard/Dockerfile
+
+[Install]
+WantedBy=default.target
