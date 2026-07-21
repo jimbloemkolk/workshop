@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api, type SessionDetail } from '../api'
 import { useRangePlayer } from '../audio'
+import { SnippetPlayer } from '../components/SnippetPlayer'
 
 /** Ten seconds of work: one sample utterance per diarized speaker, tap the
  * participant it belongs to. */
@@ -31,12 +32,16 @@ export function LabelView({ detail, onError }: {
         <div className="speaker" key={s.label}>
           <div className="row">
             <strong>{s.label}</strong>
-            {s.sampleStartS != null && (
-              <button onClick={() => player.playRange(s.sampleStartS!, s.sampleEndS)}>
-                ▶ play sample
-              </button>
-            )}
           </div>
+          {s.sampleStartS != null && (
+            <SnippetPlayer
+              player={player}
+              playerKey={s.label}
+              start={s.sampleStartS}
+              end={s.sampleEndS}
+              fallbackDuration={detail.session.durationS}
+            />
+          )}
           <blockquote>{s.sampleText ?? '(no sample)'}</blockquote>
           <div className="row">
             {detail.participants.map((p) => (

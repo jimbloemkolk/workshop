@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type Insight, type SessionDetail, type Transcript } from '../api'
-import { useRangePlayer } from '../audio'
+import { useRangePlayer, type RangePlayer } from '../audio'
+import { SnippetPlayer } from '../components/SnippetPlayer'
 
 /** Review: transcript on the left, proposals on the right. Click a word to
  * move the selected insight's start, shift-click to move its end; in
@@ -154,7 +155,9 @@ export function ReviewView({ detail, refresh, onError }: {
             attention={attention.get(i.id) ?? []}
             selected={i.id === selected}
             onSelect={() => { setSelected(i.id); setNewModeOn(false) }}
-            onPlay={() => player.playRange(...wordRangeTimes(i.startWord, i.endWord))}
+            player={player}
+            range={wordRangeTimes(i.startWord, i.endWord)}
+            fallbackDuration={detail.session.durationS}
             onPatch={(p) => patch(i.id, p)}
           />
         ))}
@@ -207,12 +210,14 @@ function TranscriptPane({ transcript, speakerName, highlight, pendingStart, onWo
   )
 }
 
-function InsightCard({ insight, attention, selected, onSelect, onPlay, onPatch }: {
+function InsightCard({ insight, attention, selected, onSelect, player, range, fallbackDuration, onPatch }: {
   insight: Insight
   attention: string[]
   selected: boolean
   onSelect: () => void
-  onPlay: () => void
+  player: RangePlayer
+  range: [number, number | null]
+  fallbackDuration: number | null
   onPatch: (p: Parameters<typeof api.updateInsight>[1]) => void
 }) {
   const i = insight
@@ -239,15 +244,25 @@ function InsightCard({ insight, attention, selected, onSelect, onPlay, onPatch }
         </details>
       )}
       {selected && (
-        <div className="row actions" onClick={(e) => e.stopPropagation()}>
-          <button onClick={onPlay}>▶ play</button>
-          <button onClick={() => onPatch({ startWord: i.startWord - 1 })} title="start 1 word earlier">⟨−</button>
-          <button onClick={() => onPatch({ startWord: i.startWord + 1 })} title="start 1 word later">⟨+</button>
-          <button onClick={() => onPatch({ endWord: i.endWord - 1 })} title="end 1 word earlier">−⟩</button>
-          <button onClick={() => onPatch({ endWord: i.endWord + 1 })} title="end 1 word later">+⟩</button>
-          <button className="primary" onClick={() => onPatch({ status: 'accepted' })}>✓ accept</button>
-          <button className="danger" onClick={() => onPatch({ status: 'rejected' })}>✕ reject</button>
-        </div>
+        <>
+          <div className="row actions" onClick={(e) => e.stopPropagation()}>
+            <SnippetPlayer
+              player={player}
+              playerKey={String(i.id)}
+              start={range[0]}
+              end={range[1]}
+              fallbackDuration={fallbackDuration}
+            />
+          </div>
+          <div className="row actions" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => onPatch({ startWord: i.startWord - 1 })} title="start 1 word earlier">⟨−</button>
+            <button onClick={() => onPatch({ startWord: i.startWord + 1 })} title="start 1 word later">⟨+</button>
+            <button onClick={() => onPatch({ endWord: i.endWord - 1 })} title="end 1 word earlier">−⟩</button>
+            <button onClick={() => onPatch({ endWord: i.endWord + 1 })} title="end 1 word later">+⟩</button>
+            <button className="primary" onClick={() => onPatch({ status: 'accepted' })}>✓ accept</button>
+            <button className="danger" onClick={() => onPatch({ status: 'rejected' })}>✕ reject</button>
+          </div>
+        </>
       )}
       {selected && (
         <p className="muted hint">click a word = move start · shift-click = move end</p>
