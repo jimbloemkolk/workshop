@@ -226,6 +226,48 @@ EOF
 	return 0
 }
 
+# --- port range check (informational warning only) -------------------------------
+# applepie's Caddy/DNS/firewall is pre-configured for the 18000-18099 host-port range
+# (external to this repo, not derivable from any unit file) — a PublishPort= host port
+# outside that range needs manual external configuration this script can neither verify
+# nor perform, so this only warns, never blocks the deploy.
+port_out_of_range() {  # hostport-or-range (e.g. "18042" or "8080-8090")
+	local spec="$1" lo hi
+	case "$spec" in
+		*-*) lo="${spec%-*}"; hi="${spec#*-}" ;;
+		*)   lo="$spec"; hi="$spec" ;;
+	esac
+	[[ "$lo" =~ ^[0-9]+$ && "$hi" =~ ^[0-9]+$ ]] || return 1  # not numeric — can't judge, don't warn
+	(( lo < 18000 || hi > 18099 ))
+}
+
+check_ports() {  # stack...
+	local stack f line hostport found=0
+	for stack in "$@"; do
+		for f in "$SCRIPT_DIR/$stack"/*.container; do
+			[ -e "$f" ] || continue
+			while IFS= read -r line; do
+				[ -n "$line" ] || continue
+				line="${line%%/*}"  # drop /tcp or /udp suffix
+				case "$line" in
+					*:*:*) hostport="${line#*:}"; hostport="${hostport%%:*}" ;;  # ip:hostPort:containerPort
+					*:*)   hostport="${line%%:*}" ;;                            # hostPort:containerPort
+					*)     hostport="" ;;                                        # containerPort only — random host port, nothing to check
+				esac
+				[ -n "$hostport" ] || continue
+				if port_out_of_range "$hostport"; then
+					if [ "$found" = 0 ]; then
+						printf '\n\033[1;33mWARNING\033[0m PublishPort host port(s) outside applepie'\''s pre-configured 18000-18099 range — no external Caddy/DNS/firewall config exists for these; set that up manually or move the port:\n' >&2
+						found=1
+					fi
+					printf '  %s/%s: PublishPort=%s (host port %s)\n' "$stack" "$(basename "$f")" "$line" "$hostport" >&2
+				fi
+			done < <(sed -n 's/^PublishPort=//p' "$f")
+		done
+	done
+	return 0
+}
+
 # --- image refresh (pull before restart) -----------------------------------------
 image_names() {  # stack...
 	local stack f
@@ -415,6 +457,7 @@ fi
 ((${#stacks[@]})) || die "nothing to deploy"
 
 log "Tier $TIER  (ssh $TARGET)  stacks: ${stacks[*]}"
+check_ports "${stacks[@]}"
 
 ssh "$TARGET" "mkdir -p '$QDIR'" \
 	|| die "cannot reach $TARGET — is dev-hub deployed and sharable (server-config's homelab/quadlet/applepie/dev-hub/)?"
