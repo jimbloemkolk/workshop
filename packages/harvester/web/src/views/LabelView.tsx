@@ -35,6 +35,7 @@ export function LabelView({ detail, onError }: {
           start={0}
           end={detail.session.durationS}
           full
+          sessionId={id}
         />
       </div>
       {detail.speakers.map((s) => (

@@ -143,6 +143,7 @@ export const api = {
     request<{ folder: string; exported: number; clips: number; warnings: string[] }>(
       'POST', `/api/sessions/${id}/export`),
   audioUrl: (id: string) => `/api/sessions/${id}/audio`,
+  peaks: (id: string) => request<{ buckets: number[] }>('GET', `/api/sessions/${id}/peaks`),
   call: {
     // the call plugin is only mounted when the backend has LiveKit config
     enabled: () => fetch('/api/call').then((r) => r.ok, () => false),

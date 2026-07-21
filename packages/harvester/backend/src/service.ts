@@ -4,7 +4,7 @@ import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { and, eq } from 'drizzle-orm'
 import {
-  ffprobeDuration, loadTranscript, runFfmpeg, runTranscriber,
+  computePeaks, ffprobeDuration, loadTranscript, runFfmpeg, runTranscriber,
   sampleUtterances, schema, sessionDir, sessionIdFor, type Db, type Transcript,
 } from '@workshop/harvester-core'
 import { type Config } from './config.js'
@@ -76,6 +76,26 @@ export class HarvesterService {
 
   recordingPath(id: string): string {
     return path.join(sessionDir(this.config, id), 'recording.flac')
+  }
+
+  peaksPath(id: string): string {
+    return path.join(sessionDir(this.config, id), 'peaks.json')
+  }
+
+  /** Recordings are immutable post-finalize, so peaks.json is a
+   * write-once cache next to recording.flac — computed on first request,
+   * served straight off disk on every one after. */
+  async getPeaks(id: string): Promise<{ buckets: number[] }> {
+    const cachePath = this.peaksPath(id)
+    if (fs.existsSync(cachePath)) {
+      console.log(`peaks: cache hit for ${id}`)
+      return JSON.parse(fs.readFileSync(cachePath, 'utf8')) as { buckets: number[] }
+    }
+    console.log(`peaks: computing for ${id} (ffmpeg decode)`)
+    const buckets = await computePeaks(this.recordingPath(id))
+    const payload = { buckets }
+    fs.writeFileSync(cachePath, JSON.stringify(payload))
+    return payload
   }
 
   // ---- recording -----------------------------------------------------------

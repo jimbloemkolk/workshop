@@ -1,4 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { promisify } from 'node:util'
 
 export const execFileP = promisify(execFile)
@@ -42,6 +45,44 @@ export function runFfmpeg(args: string[]): Promise<void> {
     child.on('exit', (code) =>
       code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}: ${stderr.trim()}`)))
   })
+}
+
+/** Server-side loudness waveform for the SoundCloud-style full-session
+ * scrubber: decode to raw mono PCM at a throwaway-low sample rate (loudness
+ * needs no fidelity, just enough samples per bucket to average) via ffmpeg,
+ * then per-bucket RMS normalized against the loudest bucket in the file.
+ * Fixed bucket count regardless of duration — the caller resamples down to
+ * however many bars actually fit on screen. Caching (so this doesn't rerun
+ * per request) is the caller's job, not this function's. */
+export async function computePeaks(audioFile: string, buckets = 800): Promise<number[]> {
+  const tmp = path.join(os.tmpdir(),
+    `peaks-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.pcm`)
+  try {
+    // 8kHz mono s16le: plenty of samples per bucket for an RMS average even
+    // at ~800 buckets over a multi-hour recording, and a fraction of the
+    // decode cost of the original sample rate.
+    await runFfmpeg(['-y', '-i', audioFile, '-ac', '1', '-ar', '8000', '-f', 's16le', tmp])
+    const buf = fs.readFileSync(tmp)
+    const sampleCount = Math.floor(buf.length / 2) // 2 bytes/sample (s16le)
+    const raw = new Array<number>(buckets).fill(0)
+    for (let b = 0; b < buckets; b++) {
+      // Boundaries computed from (b * sampleCount) / buckets rather than a
+      // fixed samplesPerBucket stride, so the remainder is spread evenly
+      // across buckets instead of piling onto the last one.
+      const start = Math.floor((b * sampleCount) / buckets)
+      const end = Math.floor(((b + 1) * sampleCount) / buckets)
+      let sumSq = 0
+      for (let i = start; i < end; i++) {
+        const s = buf.readInt16LE(i * 2) / 32768
+        sumSq += s * s
+      }
+      raw[b] = end > start ? Math.sqrt(sumSq / (end - start)) : 0
+    }
+    const max = Math.max(...raw, 1e-9)
+    return raw.map((v) => Math.min(1, v / max))
+  } finally {
+    fs.rmSync(tmp, { force: true })
+  }
 }
 
 /** Markers below the minimum duration are kept but flagged — auditable,

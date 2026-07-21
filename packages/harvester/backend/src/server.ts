@@ -87,6 +87,18 @@ export async function startServer(
       .sendFile(path.join(id, 'recording.flac'))
   })
 
+  // Loudness waveform for the full-session scrubber. Unlike /audio (served
+  // via sendFile, whose own 404-on-missing-file covers this for us), this
+  // one computes/returns JSON, so a missing/unfinalized recording is
+  // checked explicitly for the same 404 behavior.
+  app.get('/api/sessions/:id/peaks', async (req, reply) => {
+    const { id } = req.params as { id: string }
+    if (!fs.existsSync(service.recordingPath(id))) {
+      return reply.status(404).send({ error: 'no recording for session' })
+    }
+    return service.getPeaks(id)
+  })
+
   app.get('/api/sessions/:id/transcript', async (req, reply) => {
     const { id } = req.params as { id: string }
     return reply.type('application/json').sendFile(path.join(id, 'transcript.json'))

@@ -152,6 +152,7 @@ export function ReviewView({ detail, refresh, onError }: {
           start={0}
           end={detail.session.durationS}
           full
+          sessionId={id}
         />
       </div>
       <section className="transcript">
