@@ -331,8 +331,14 @@ pull_images "${stacks[@]}"
 
 # Apply on the host, as the applepie user (via dev-hub's bind-mounted CONTAINER_HOST /
 # DBUS_SESSION_BUS_ADDRESS — no XDG_RUNTIME_DIR export needed here, see header).
-ssh "$TARGET" 'bash -s' -- "$APPS_DIR/$TIER" "$QDIR" "${DEPLOY_RESTART_ALL:-0}" \
-	"$force_restart_csv" "${stacks[@]}" <<'REMOTE'
+# ssh joins its arguments with SPACES, unquoted, into one remote command string — an
+# empty "$force_restart_csv" would simply vanish, shifting every later positional arg
+# left by one and leaving the remote script's stack list empty (hit live: a deploy with
+# nothing force-restarted silently installed no unit files and restarted nothing).
+# printf %q re-quotes each arg so the remote bash reparses them exactly as passed —
+# an empty string survives as ''.
+ssh "$TARGET" "bash -s -- $(printf '%q ' "$APPS_DIR/$TIER" "$QDIR" "${DEPLOY_RESTART_ALL:-0}" \
+	"$force_restart_csv" "${stacks[@]}")" <<'REMOTE'
 set -euo pipefail
 apps_root="$1"; shift
 QDIR="$1"; shift
