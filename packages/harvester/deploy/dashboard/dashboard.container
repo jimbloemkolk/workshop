@@ -64,11 +64,13 @@ Volume=/data/appdata/applepie:/data/appdata/applepie:ro
 Volume=dashboard-data.volume:/var/lib/dashboard
 
 # UI + API on container :5151, published on host LOOPBACK only — applepie's own caddy
-# will reach it via a pasta -T,15151 forward (not added to applepie.pod as of this
-# commit — see ../README.md § Dashboard) and proxy dashboard.staging.applepie.company ->
-# 127.0.0.1:15151 (../caddy/conf.d/dashboard.caddy). Same +10000 offset convention as
-# harvester-app (4747 container / 14747 host): 5151 container / 15151 host.
-PublishPort=127.0.0.1:15151:5151
+# reaches it via applepie.pod's existing pasta -T,18000-18099 forward block (see
+# server-config's homelab/quadlet/applepie/dev-hub/applepie.pod) and proxies
+# dashboard.staging.applepie.company -> 127.0.0.1:18051
+# (../caddy/conf.d/dashboard.caddy). 18051 picked from that pre-forwarded range instead
+# of harvester-app's own +10000 convention (which would land on 15151, outside the
+# range and requiring a dev-hub.pod edit this repo can't make).
+PublishPort=127.0.0.1:18051:5151
 
 [Service]
 Restart=always

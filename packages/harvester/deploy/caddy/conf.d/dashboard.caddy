@@ -1,15 +1,10 @@
 # Applepie ops-monitoring dashboard (../../dashboard/) — host-matched inside the
 # wildcard *.staging.applepie.company block, so this fragment just host-matches and
 # proxies (the wildcard cert covers it, same as harvester.caddy/livekit-harvester.caddy).
-# Backend publishes on host loopback 127.0.0.1:15151, forwarded into this container by
-# applepie.pod's `-T,15151` pasta entry.
-#
-# NOTE: that pasta entry is NOT in applepie.pod's Network= line yet as of this commit
-# (dev-hub/the pod are provisioned from server-config, out of this repo's reach — see
-# ../../README.md § Dashboard) — until it's added, this vhost 502s even though the
-# dashboard container itself is healthy on 127.0.0.1:15151 (confirmed directly on the
-# box, see ../../README.md).
+# Backend publishes on host loopback 127.0.0.1:18051, forwarded into this container by
+# applepie.pod's existing `-T,18000-18099` pasta block — no dev-hub/server-config edit
+# needed (unlike the old 15151 port, which wasn't in that pod's forward list and 502'd).
 @dashboard host dashboard.staging.applepie.company
 handle @dashboard {
-	reverse_proxy 127.0.0.1:15151
+	reverse_proxy 127.0.0.1:18051
 }
