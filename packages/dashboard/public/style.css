@@ -1,0 +1,375 @@
+/* Theme tokens — light default, dark via prefers-color-scheme. Values are
+ * the design system handed down for this dashboard; do not invent new ones
+ * ad hoc. Categorical/status colors are reserved for marks, never text. */
+:root {
+  --surface: #fcfcfb;
+  --page: #f9f9f7;
+  --ink: #0b0b0b;
+  --ink-secondary: #52514e;
+  --ink-muted: #898781;
+  --gridline: #e1e0d9;
+  --axis: #c3c2b7;
+
+  --cat-1: #2a78d6; /* blue */
+  --cat-2: #008300; /* green */
+  --cat-3: #e87ba4; /* magenta */
+  --cat-4: #eda100; /* yellow */
+
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #1a1a19;
+    --page: #0d0d0d;
+    --ink: #ffffff;
+    --ink-secondary: #c3c2b7;
+    --ink-muted: #898781;
+    --gridline: #2c2c2a;
+    --axis: #383835;
+
+    --cat-1: #3987e5;
+    --cat-3: #d55181;
+    --cat-4: #c98500;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+header.top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 20px 24px 8px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+header.top h1 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+}
+
+#updated {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 8px 24px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+section h2 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-secondary);
+  margin: 0 0 10px;
+}
+
+/* ---- stat tiles ---- */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--gridline);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  min-width: 0;
+}
+
+.tile .value {
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tile .label {
+  color: var(--ink-muted);
+  font-size: 11px;
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.tile .sub {
+  color: var(--ink-secondary);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+/* icon + word status chips — never color alone */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.status-good {
+  color: var(--status-good);
+}
+.status-warning {
+  color: var(--status-warning);
+}
+.status-serious {
+  color: var(--status-serious);
+}
+.status-critical {
+  color: var(--status-critical);
+}
+.status-good .status-dot {
+  background: var(--status-good);
+}
+.status-warning .status-dot {
+  background: var(--status-warning);
+}
+.status-serious .status-dot {
+  background: var(--status-serious);
+}
+.status-critical .status-dot {
+  background: var(--status-critical);
+}
+.status-na {
+  color: var(--ink-muted);
+}
+.status-na .status-dot {
+  background: var(--ink-muted);
+}
+
+/* ---- panel wrapper for charts/tables ---- */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--gridline);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  overflow-x: auto;
+}
+
+/* ---- services table ---- */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 480px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--gridline);
+  font-size: 13px;
+}
+
+th {
+  color: var(--ink-muted);
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+td.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- chart containers: fixed height, no layout shift while loading ---- */
+.chart-box {
+  position: relative;
+  height: 190px;
+}
+
+.chart-box svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.chart-legend {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--ink-secondary);
+  margin-bottom: 8px;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
+
+/* ---- tooltip ---- */
+.tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 12px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  line-height: 1.5;
+  white-space: nowrap;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.08s ease;
+  transform: translate(-50%, -100%);
+  top: -8px;
+}
+
+.tooltip.visible {
+  opacity: 1;
+}
+
+.tooltip .tt-title {
+  font-weight: 600;
+}
+
+/* ---- storage bars ---- */
+.bar-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 90px;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 12px;
+}
+
+.bar-row .name {
+  color: var(--ink-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar-track {
+  height: 10px;
+  background: var(--gridline);
+  border-radius: 5px;
+  overflow: hidden;
+  display: flex;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 5px;
+}
+
+.bar-row .val {
+  text-align: right;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.subdir-list {
+  margin: 4px 0 12px 150px;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.subdir-list span {
+  margin-right: 14px;
+}
+
+/* ---- uptime strip ---- */
+.strip {
+  display: flex;
+  gap: 2px;
+  height: 22px;
+  margin-top: 6px;
+}
+
+.strip .cell {
+  flex: 1;
+  border-radius: 2px;
+  min-width: 2px;
+}
+
+.cell-ok {
+  background: var(--status-good);
+}
+.cell-fail {
+  background: var(--status-critical);
+}
+.cell-empty {
+  background: var(--gridline);
+}
+
+.strip-label {
+  font-size: 12px;
+  color: var(--ink-secondary);
+  margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.na {
+  color: var(--ink-muted);
+}
+
+.empty-note {
+  color: var(--ink-muted);
+  font-size: 12px;
+  padding: 6px 0;
+}
+
+@media (max-width: 640px) {
+  .bar-row {
+    grid-template-columns: 96px 1fr 70px;
+  }
+  .subdir-list {
+    margin-left: 106px;
+  }
+}

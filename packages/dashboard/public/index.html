@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>applepie — staging dashboard</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <h1>applepie — staging dashboard</h1>
+      <span id="updated">loading…</span>
+    </header>
+    <main>
+      <section>
+        <div class="tiles" id="tiles"></div>
+      </section>
+
+      <section>
+        <h2>Services</h2>
+        <div class="panel">
+          <table id="services-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>State</th>
+                <th>Uptime</th>
+                <th>Image</th>
+              </tr>
+            </thead>
+            <tbody id="services-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>Deploys</h2>
+        <div class="panel">
+          <div class="chart-legend" id="deploys-legend"></div>
+          <div class="chart-box" id="deploys-chart"></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Latency (24h)</h2>
+        <div class="panel">
+          <div class="chart-legend" id="latency-legend"></div>
+          <div class="chart-box" id="latency-chart"></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Uptime (24h)</h2>
+        <div class="panel" id="uptime-strips"></div>
+      </section>
+
+      <section>
+        <h2>Storage</h2>
+        <div class="panel" id="storage-panel"></div>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
