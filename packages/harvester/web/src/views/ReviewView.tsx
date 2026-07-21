@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type Insight, type SessionDetail, type Transcript } from '../api'
 import { useRangePlayer, type RangePlayer } from '../audio'
 import { SnippetPlayer } from '../components/SnippetPlayer'
@@ -70,6 +70,23 @@ export function ReviewView({ detail, refresh, onError }: {
     return [Math.max(0, start - 0.2), end != null ? end + 0.2 : null]
   }
 
+  // Unaligned words (w.start == null) have no time of their own — walk
+  // outward by index until an aligned neighbor turns up. null only when the
+  // transcript has no aligned words at all, in which case the caller no-ops.
+  const wordPlayTime = (index: number): number | null => {
+    if (!transcript) return null
+    const words = transcript.words
+    const direct = words[index]?.start
+    if (direct != null) return direct
+    for (let d = 1; d < words.length; d++) {
+      const left = words[index - d]?.start
+      if (left != null) return left
+      const right = words[index + d]?.start
+      if (right != null) return right
+    }
+    return null
+  }
+
   const patch = async (insightId: number, p: Parameters<typeof api.updateInsight>[1]) => {
     try {
       await api.updateInsight(insightId, p)
@@ -93,7 +110,15 @@ export function ReviewView({ detail, refresh, onError }: {
       }
       return
     }
-    if (!current) return
+    if (!current) {
+      // No insight selected and not building a new one: a plain click is
+      // free to mean "play from here" instead — jump the full-session
+      // player to this word and start it, taking over from whatever
+      // (session bar or an insight snippet) was playing before.
+      const atS = wordPlayTime(index)
+      if (atS != null) player.playFrom('session', 0, detail.session.durationS, atS)
+      return
+    }
     if (shift) {
       if (index >= current.startWord) void patch(current.id, { endWord: index + 1 })
     } else if (index < current.endWord) {
@@ -120,6 +145,15 @@ export function ReviewView({ detail, refresh, onError }: {
 
   return (
     <main className="review">
+      <div className="session-bar">
+        <SnippetPlayer
+          player={player}
+          playerKey="session"
+          start={0}
+          end={detail.session.durationS}
+          full
+        />
+      </div>
       <section className="transcript">
         {transcript ? (
           <TranscriptPane
@@ -128,6 +162,8 @@ export function ReviewView({ detail, refresh, onError }: {
             highlight={current}
             pendingStart={newModeOn ? newMode.start : null}
             onWordClick={onWordClick}
+            playheadS={player.activeKey != null ? player.position : null}
+            isPlaying={player.playingKey != null}
           />
         ) : <p className="muted">loading transcript…</p>}
       </section>
@@ -166,12 +202,42 @@ export function ReviewView({ detail, refresh, onError }: {
   )
 }
 
-function TranscriptPane({ transcript, speakerName, highlight, pendingStart, onWordClick }: {
+/** Sorted, non-overlapping [startS, endS) bounds per segment — the sort key
+ * is a separate array from render order (transcript.segments is left
+ * untouched) purely so `findSegmentAt` can binary-search it.
+ *
+ * Returns the segment containing `t`, or — in a gap between sentences —
+ * the upcoming one (smallest startS > t), so the highlight anticipates the
+ * next line during silence instead of going dark. Before the first segment,
+ * that's the first segment; after the last segment's end, there's nothing
+ * upcoming and this returns null. */
+function findSegmentAt(bounds: { id: number; startS: number; endS: number }[], t: number): number | null {
+  let lo = 0
+  let hi = bounds.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    const b = bounds[mid]
+    if (t < b.startS) hi = mid - 1
+    else if (t >= b.endS) lo = mid + 1
+    else return b.id
+  }
+  // Not inside any segment: the loop's invariant leaves lo at the
+  // insertion point — the first index whose startS > t — which is exactly
+  // the upcoming segment. lo === bounds.length past the last segment.
+  return bounds[lo]?.id ?? null
+}
+
+function TranscriptPane({ transcript, speakerName, highlight, pendingStart, onWordClick, playheadS, isPlaying }: {
   transcript: Transcript
   speakerName: Map<string, string>
   highlight: Insight | null
   pendingStart: number | null
   onWordClick: (index: number, shift: boolean) => void
+  /** Absolute recording time of whatever's loaded into the shared player
+   * (session bar or an insight snippet — both live in this view), or null
+   * when nothing has ever played. Drives the "now speaking" highlight. */
+  playheadS: number | null
+  isPlaying: boolean
 }) {
   const bySegment = useMemo(() => {
     const map = new Map<number, typeof transcript.words>()
@@ -183,10 +249,72 @@ function TranscriptPane({ transcript, speakerName, highlight, pendingStart, onWo
     return map
   }, [transcript])
 
+  // Precomputed once per transcript (not per position tick): min/max timed
+  // word per segment, sorted by start so findSegmentAt can binary-search
+  // instead of scanning every word on every rAF-driven position update.
+  const segmentBounds = useMemo(() => {
+    const bounds: { id: number; startS: number; endS: number }[] = []
+    for (const seg of transcript.segments) {
+      let startS: number | null = null
+      let endS: number | null = null
+      for (const w of bySegment.get(seg.id) ?? []) {
+        if (w.start != null) startS = startS == null ? w.start : Math.min(startS, w.start)
+        if (w.end != null) endS = endS == null ? w.end : Math.max(endS, w.end)
+      }
+      if (startS != null && endS != null) bounds.push({ id: seg.id, startS, endS })
+    }
+    bounds.sort((a, b) => a.startS - b.startS)
+    return bounds
+  }, [transcript, bySegment])
+
+  const activeSegmentId = playheadS != null ? findSegmentAt(segmentBounds, playheadS) : null
+  // Karaoke word within the active segment — a handful of words, so a plain
+  // scan (no memoization) is cheap enough to just do inline. Needs no gap
+  // handling of its own: when activeSegmentId is the *upcoming* segment
+  // during a silence, playheadS is still before all of its words' starts,
+  // so this naturally comes up empty — only the segment wash shows, no
+  // word is underlined until it's actually being spoken.
+  const activeWordIndex = (() => {
+    if (activeSegmentId == null || playheadS == null) return null
+    for (const w of bySegment.get(activeSegmentId) ?? []) {
+      if (w.start != null && w.end != null && playheadS >= w.start && playheadS < w.end) return w.index
+    }
+    return null
+  })()
+
+  // Auto-scroll fires at most once per (segment, "started playing")
+  // transition, tracked via lastScrolledRef rather than relying solely on
+  // the effect's dependency array — activeKey/position update synchronously
+  // from playFrom()/seek(), but playingKey only flips once the element's
+  // native 'play' event lands a task later, so a click-to-play into a new
+  // segment can commit two separate renders: one where activeSegmentId has
+  // already changed but isPlaying is still stale-false, then another where
+  // isPlaying turns true but activeSegmentId is unchanged. Depending on
+  // both and gating on "have we already scrolled *for this segment* while
+  // playing" (not "did activeSegmentId change on *this* render") catches
+  // whichever render actually has both pieces true, so a click on a
+  // far/offscreen word still scrolls once playback starts. It also still
+  // suppresses re-scrolling on a plain pause/resume of the same segment
+  // (lastScrolledRef already matches), and still never scrolls for a scrub
+  // while paused (isPlaying false skips before lastScrolledRef is touched) —
+  // until play starts, at which point it scrolls once, which is desirable.
+  const lastScrolledRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (activeSegmentId == null || !isPlaying) return
+    if (lastScrolledRef.current === activeSegmentId) return
+    lastScrolledRef.current = activeSegmentId
+    document.getElementById(`segment-${activeSegmentId}`)
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [activeSegmentId, isPlaying])
+
   return (
     <>
       {transcript.segments.map((seg) => (
-        <p key={seg.id} className="segment">
+        <p
+          key={seg.id}
+          id={`segment-${seg.id}`}
+          className={`segment${seg.id === activeSegmentId ? ' now-playing' : ''}`}
+        >
           <span className="speaker-tag">
             {seg.speaker ? speakerName.get(seg.speaker) ?? seg.speaker : '?'}
           </span>{' '}
@@ -194,10 +322,11 @@ function TranscriptPane({ transcript, speakerName, highlight, pendingStart, onWo
             const inHighlight = highlight != null &&
               w.index >= highlight.startWord && w.index < highlight.endWord
             const isPending = pendingStart === w.index
+            const isNowWord = w.index === activeWordIndex
             return (
               <span
                 key={w.index}
-                className={`word${inHighlight ? ' hl' : ''}${isPending ? ' pending' : ''}${w.aligned ? '' : ' unaligned'}`}
+                className={`word${inHighlight ? ' hl' : ''}${isPending ? ' pending' : ''}${w.aligned ? '' : ' unaligned'}${isNowWord ? ' now-word' : ''}`}
                 onClick={(e) => onWordClick(w.index, e.shiftKey)}
               >
                 {w.text}{' '}

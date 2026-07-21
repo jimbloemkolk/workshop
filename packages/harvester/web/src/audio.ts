@@ -35,6 +35,15 @@ export interface RangePlayer {
    * already active just moves currentTime, so playback (if any) continues
    * uninterrupted from the new position. */
   seek(key: string, start: number, end: number | null, offsetS: number): void
+  /** seek() + "and make sure it's actually playing" as one atomic call —
+   * for click-to-play affordances (e.g. clicking a transcript word) where,
+   * unlike scrubbing, silently repositioning without resuming would be the
+   * wrong default. Reads the element's own paused state directly rather
+   * than going through the caller's (possibly one-render-stale) playingKey,
+   * so it can't get the resume decision wrong: same key already playing →
+   * seek rides through, playback continues uninterrupted; anything else
+   * (different key, or same key paused/finished) → seek then play(). */
+  playFrom(key: string, start: number, end: number | null, offsetS: number): void
   stop(): void
 }
 
@@ -158,6 +167,19 @@ export function useRangePlayer(sessionId: string): RangePlayer {
       finishedRef.current = false
       setActiveKey(key)
       setPosition(el.currentTime)
+    },
+    playFrom(key, start, end, offsetS) {
+      const el = ref.current
+      if (!el) return
+      if (keyRef.current !== key) el.pause()
+      const bound = end ?? Infinity
+      el.currentTime = Math.min(Math.max(start, start + Math.max(0, offsetS)), bound)
+      stopAt.current = end
+      keyRef.current = key
+      finishedRef.current = false
+      setActiveKey(key)
+      setPosition(el.currentTime)
+      if (el.paused) void el.play()
     },
     stop() {
       ref.current?.pause()

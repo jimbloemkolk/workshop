@@ -28,6 +28,15 @@ export function LabelView({ detail, onError }: {
   return (
     <main className="label">
       <h1>Who is who?</h1>
+      <div className="session-bar">
+        <SnippetPlayer
+          player={player}
+          playerKey="session"
+          start={0}
+          end={detail.session.durationS}
+          full
+        />
+      </div>
       {detail.speakers.map((s) => (
         <div className="speaker" key={s.label}>
           <div className="row">

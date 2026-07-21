@@ -7,7 +7,7 @@ import type { RangePlayer } from '../audio'
  * whole list of these can sit side by side and only the one actually
  * loaded into the element will show a live, moving position; the rest
  * render at 0 until picked. */
-export function SnippetPlayer({ player, playerKey, start, end, fallbackDuration }: {
+export function SnippetPlayer({ player, playerKey, start, end, fallbackDuration, full }: {
   player: RangePlayer
   playerKey: string
   start: number
@@ -17,6 +17,10 @@ export function SnippetPlayer({ player, playerKey, start, end, fallbackDuration 
    * the scrubber isn't degenerate. */
   end: number | null
   fallbackDuration?: number | null
+  /** Full-width "whole recording" variant (bigger button, more prominent
+   * scrubber) for a session-level bar, as opposed to the compact per-
+   * snippet default used inline in insight cards / speaker samples. */
+  full?: boolean
 }) {
   const resolvedEnd = end ?? fallbackDuration ?? player.duration ?? start
   const dur = Math.max(0, resolvedEnd - start)
@@ -25,7 +29,7 @@ export function SnippetPlayer({ player, playerKey, start, end, fallbackDuration 
   const offset = isActive ? Math.min(Math.max(player.position - start, 0), dur) : 0
 
   return (
-    <div className="snippet-player" onClick={(e) => e.stopPropagation()}>
+    <div className={`snippet-player${full ? ' session-player' : ''}`} onClick={(e) => e.stopPropagation()}>
       <button
         className="icon-btn"
         aria-label={isPlaying ? 'pause' : 'play'}

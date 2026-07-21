@@ -161,7 +161,20 @@ blockquote {
   max-height: calc(100vh - 8rem); overflow-y: auto; padding-right: 0.75rem;
   line-height: 1.9; font-size: 1.02rem;
 }
-.segment { margin: 0 0 0.7rem; }
+/* margin-left/padding-left below net to a ~0 visual indent (-1.06rem +
+   1rem) and are permanent on every segment — not just .now-playing — so
+   toggling the highlight only ever repaints (background/box-shadow color),
+   never resizes or reflows the paragraph or its neighbors. The extra 0.4rem
+   of matched margin/padding (vs. a bare ~0 inset) is left-breathing-room for
+   the wash so it reads as a box around the speaker tag + line, not a strip
+   flush against the text. */
+.segment {
+  margin: 0 0 0.7rem -1.06rem;
+  padding: 0.1rem 0 0.1rem 1rem;
+  border-radius: 2px;
+  box-shadow: inset 3px 0 0 transparent;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
 .speaker-tag {
   font-size: 0.6rem; color: var(--muted);
   margin-right: 0.4rem;
@@ -171,6 +184,15 @@ blockquote {
 .word.hl { background: var(--accent-soft); }
 .word.pending { outline: 1px solid var(--accent); }
 .word.unaligned { text-decoration: underline dotted var(--warn); }
+/* "now speaking" — driven by playback position, distinct from .hl's solid
+   selected-insight fill: a whole-paragraph accent rule + faint wash rather
+   than an opaque word background, so the two are never mistaken for each
+   other even when both are visible at once. */
+.segment.now-playing {
+  box-shadow: inset 3px 0 0 var(--accent);
+  background: var(--accent-wash);
+}
+.word.now-word { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
 .insights { max-height: calc(100vh - 8rem); overflow-y: auto; display: flex; flex-direction: column; gap: 0.8rem; }
 .toolbar { position: sticky; top: 0; background: var(--paper); padding: 0.4rem 0; z-index: 1; }
 .card {
@@ -282,3 +304,19 @@ button.icon-btn {
 .scrubber::-moz-range-track { height: 3px; background: var(--rule); border-radius: 999px; }
 .scrubber:disabled { opacity: 0.4; cursor: default; }
 .snippet-player .time { flex-shrink: 0; font-size: 0.62rem; font-variant-numeric: tabular-nums; }
+
+/* session bar: the whole-recording player, distinct from the compact
+   per-snippet ones it sits alongside — wraps a SnippetPlayer in `full`
+   mode with a card frame and a bigger, bolder scrubber. In .review it's a
+   grid item spanning both columns, sitting above the transcript/proposals
+   split; in .label it's just another block at the top of the flex column. */
+.session-bar {
+  grid-column: 1 / -1;
+  border: 1px solid var(--rule); border-radius: 3px;
+  padding: 0.7rem 1.1rem; background: var(--surface);
+}
+.session-player .icon-btn { width: 2.5rem; height: 2.5rem; font-size: 1rem; }
+.session-player .scrubber { height: 5px; }
+.session-player .scrubber::-webkit-slider-thumb { width: 15px; height: 15px; }
+.session-player .scrubber::-moz-range-thumb { width: 15px; height: 15px; }
+.session-player .time { font-size: 0.7rem; }
