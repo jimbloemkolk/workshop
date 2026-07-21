@@ -27,14 +27,22 @@ COPY packages/harvester/backend/package.json packages/harvester/backend/
 COPY packages/harvester/web/package.json packages/harvester/web/
 RUN pnpm install --filter './packages/harvester/*' --frozen-lockfile
 
-COPY packages/harvester packages/harvester
+# transcriber env, pinned by its OWN uv.lock — packages/transcriber is a self-contained
+# uv project (no uv workspace, no path dependency on packages/harvester or the pnpm
+# world; verified against its pyproject.toml/uv.lock), so this needs nothing from the
+# harvester COPY below. Deliberately ordered ahead of it: `COPY packages/harvester`
+# changes on essentially every deploy (any TS edit), which would otherwise bust this
+# layer's cache and force a full torch/whisperx re-resolve+download every time. This
+# layer only invalidates when packages/transcriber itself changes, which is rare —
+# changes-rarely above changes-every-deploy. ct2 runs on plain CPU.
 COPY packages/transcriber packages/transcriber
-
-# web app → web/dist, served by the backend (static + SPA fallback)
-RUN pnpm --filter @workshop/harvester-web build
-
-# transcriber env, pinned by its uv.lock; ct2 runs on plain CPU
 RUN cd packages/transcriber && uv sync --no-dev
+
+COPY packages/harvester packages/harvester
+
+# web app → web/dist, served by the backend (static + SPA fallback). Must stay after
+# the harvester COPY above — it builds packages/harvester/web, which lives in it.
+RUN pnpm --filter @workshop/harvester-web build
 
 ENV HARVESTER_TRANSCRIBER_BACKEND=ct2 \
     NODE_ENV=production
