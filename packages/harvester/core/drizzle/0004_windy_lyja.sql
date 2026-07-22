@@ -1,0 +1,1 @@
+ALTER TABLE `insights` DROP COLUMN `exported_path`;

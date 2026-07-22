@@ -6,6 +6,8 @@ export interface Session {
   createdAt: number
   durationS: number | null
   error: string | null
+  /** fully reviewed (no proposals left) — the list dims these (derived server-side) */
+  curated: boolean
 }
 
 export interface JoinLink {
@@ -72,8 +74,31 @@ export interface Insight {
   insight: string
   anchored: boolean
   status: 'proposed' | 'accepted' | 'rejected'
-  exportedPath: string | null
   supporting: SupportingQuote[]
+}
+
+/** An ocean entry. `title`/`description` are the snippet's own (diverge-able)
+ * copy; `quote`/`sessionId`/`sessionTitle` are resolved live from the source
+ * insight and are null once that source has been removed. */
+export interface Snippet {
+  id: number
+  title: string
+  description: string
+  spokenAt: number
+  createdAt: number
+  sourceInsightId: number
+  sessionId: string | null
+  sessionTitle: string | null
+  quote: string | null
+}
+
+/** Metadata for an ocean export download (the zip itself is saved by the
+ * browser; this rides an out-of-band header for the toast). */
+export interface OceanExportReport {
+  filename: string
+  exported: number
+  clips: number
+  warnings: string[]
 }
 
 export interface SessionDetail {
@@ -142,6 +167,30 @@ export const api = {
   export: (id: string) =>
     request<{ folder: string; exported: number; clips: number; warnings: string[] }>(
       'POST', `/api/sessions/${id}/export`),
+  snippets: (q?: string) =>
+    request<Snippet[]>('GET', `/api/snippets${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  // The ocean export is a file download, not JSON: POST, save the returned
+  // zip via a transient object URL, and read the counts/warnings off the
+  // out-of-band header for the caller's toast.
+  exportOcean: async (q?: string): Promise<OceanExportReport> => {
+    const res = await fetch(`/api/ocean/export${q ? `?q=${encodeURIComponent(q)}` : ''}`, { method: 'POST' })
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({ error: res.statusText })) as { error?: string }
+      throw new Error(detail.error ?? res.statusText)
+    }
+    const header = res.headers.get('X-Export-Report')
+    const report = (header ? JSON.parse(decodeURIComponent(header)) : {}) as OceanExportReport
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = report.filename ?? 'ocean-export.zip'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    return report
+  },
   audioUrl: (id: string) => `/api/sessions/${id}/audio`,
   peaks: (id: string) => request<{ buckets: number[] }>('GET', `/api/sessions/${id}/peaks`),
   call: {

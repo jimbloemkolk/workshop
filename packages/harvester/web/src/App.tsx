@@ -7,15 +7,21 @@ import { LabelView } from './views/LabelView'
 import { PipelineView } from './views/PipelineView'
 import { ReviewView } from './views/ReviewView'
 import { SessionList } from './views/SessionList'
+import { SnippetsView } from './views/SnippetsView'
 
 function hashSession(): string | null {
   const m = /^#\/session\/(.+)$/.exec(location.hash)
   return m ? m[1]! : null
 }
 
+function isOceanHash(): boolean {
+  return location.hash === '#/ocean'
+}
+
 export function App() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [current, setCurrent] = useState<string | null>(hashSession())
+  const [ocean, setOcean] = useState<boolean>(isOceanHash())
   const [detail, setDetail] = useState<SessionDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -28,7 +34,7 @@ export function App() {
   }, [])
 
   useEffect(() => {
-    const onHash = () => setCurrent(hashSession())
+    const onHash = () => { setCurrent(hashSession()); setOcean(isOceanHash()) }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
@@ -94,10 +100,13 @@ export function App() {
         <a href="#" onClick={(e) => { e.preventDefault(); location.hash = '' }}>
           🌾 Insight Harvester
         </a>
+        <a className="nav-ocean" href="#/ocean">🌊 Ocean</a>
         {detail && <span className="crumb">{detail.session.title} · {detail.session.status}</span>}
       </header>
       {error && <div className="error" onClick={() => setError(null)}>{error}</div>}
-      {!current || !detail ? (
+      {ocean ? (
+        <SnippetsView onOpenSession={open} />
+      ) : !current || !detail ? (
         <SessionList
           sessions={sessions}
           onOpen={open}

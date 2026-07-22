@@ -2,13 +2,14 @@ import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
-import { and, eq } from 'drizzle-orm'
+import Fuse from 'fuse.js'
+import { and, eq, isNull } from 'drizzle-orm'
 import {
   computePeaks, ffprobeDuration, loadTranscript, runFfmpeg, runTranscriber,
   sampleUtterances, schema, sessionDir, sessionIdFor, type Db, type Transcript,
 } from '@workshop/harvester-core'
 import { type Config } from './config.js'
-import { exportSession, type ExportReport } from './export/exporter.js'
+import { exportSession, exportOcean, type ExportReport, type OceanExport } from './export/exporter.js'
 import { createAgentClient, type AgentClient } from './harvest/agent.js'
 import { createFixtureClient } from './harvest/fixture.js'
 import { runHarvest, runManualTurn, type Proposal, type SpanInput } from './harvest/harvester.js'
@@ -32,7 +33,21 @@ export class HarvesterService {
   }
 
   listSessions() {
-    return this.db.select().from(schema.sessions).all()
+    const sessions = this.db.select().from(schema.sessions).all()
+    // "curated" = fully reviewed: a post-harvest session with no insight still
+    // `proposed` (every one accepted or rejected). Derived, not stored — it
+    // flips the moment the last verdict lands, and flips back if a re-harvest
+    // proposes more. The list dims these; a curated conversation is no longer
+    // something to look at directly (its accepted ideas live in the ocean now).
+    const stillProposed = new Set(
+      this.db.select({ sessionId: schema.insights.sessionId }).from(schema.insights)
+        .where(eq(schema.insights.status, 'proposed')).all().map((r) => r.sessionId),
+    )
+    return sessions
+      .map((s) => ({
+        ...s,
+        curated: (s.status === 'reviewing' || s.status === 'exported') && !stillProposed.has(s.id),
+      }))
       .sort((a, b) => b.createdAt - a.createdAt)
   }
 
@@ -303,6 +318,7 @@ export class HarvesterService {
       quote: p.main.quote,
       insight: p.insight,
       anchored: p.main.anchored,
+      spokenAt: this.spokenAtOf(sessionId, p.main.range.start),
       status: 'proposed',
       createdAt: Date.now(),
     }).returning().get()
@@ -348,16 +364,166 @@ export class HarvesterService {
       // Boundaries set by a human against the words array are anchored by construction.
       values.quote = verbatim(transcript.words, { start, end })
       values.anchored = true
+      // Moving the range moves the spoken moment — recompute the birthday.
+      values.spokenAt = this.spokenAtOf(insight.sessionId, start)
     }
+
+    // Backfill lazily: rows created before this column (or seeded without a
+    // transcript on hand) get their spoken moment the first time they're
+    // touched, so the ocean can sort them by when the words were said.
+    if (values.spokenAt == null && insight.spokenAt == null) {
+      const at = this.spokenAtOf(insight.sessionId, insight.startWord)
+      if (at != null) values.spokenAt = at
+    }
+
     this.db.update(schema.insights).set(values)
       .where(eq(schema.insights.id, insightId)).run()
+
+    // Accepting an insight is what "moves it into the ocean": a snippet is
+    // born, once, on the transition to accepted. Copy title/description from
+    // the insight's final state (this same patch may have edited them); from
+    // then on the snippet is free to diverge and the insight stays the source.
+    if (patch.status === 'accepted' && insight.status !== 'accepted') {
+      this.ensureSnippet(
+        { id: insight.id },
+        values.title ?? insight.title,
+        values.insight ?? insight.insight,
+      )
+    }
+
     this.emit({ type: 'session', sessionId: insight.sessionId })
+  }
+
+  // ---- snippets (the ocean) ------------------------------------------------
+
+  /** Born once per source insight. Idempotent: re-accepting (or accepting an
+   * insight that already spawned a snippet, e.g. after an un-accept round
+   * trip) never clobbers an edited snippet. */
+  private ensureSnippet(
+    insight: { id: number },
+    title: string,
+    description: string,
+  ): void {
+    const existing = this.db.select().from(schema.snippets)
+      .where(eq(schema.snippets.sourceInsightId, insight.id)).get()
+    if (existing) return
+    this.db.insert(schema.snippets).values({
+      sourceInsightId: insight.id,
+      title,
+      description,
+      createdAt: Date.now(),
+    }).run()
+  }
+
+  /** The backfill pass for migration 0003. The column it adds can be filled
+   * by SQL, but the *value* can't: the word offset lives in transcript.json on
+   * disk, out of a `.sql` migration's reach. So it runs here in code, once at
+   * boot right after migrations. Only null rows are touched — a no-op on every
+   * boot after the first, and self-healing if a transcript arrives later. */
+  backfillSpokenAt(): void {
+    const pending = this.db.select().from(schema.insights)
+      .where(isNull(schema.insights.spokenAt)).all()
+    if (pending.length === 0) return
+    let filled = 0
+    for (const i of pending) {
+      const at = this.spokenAtOf(i.sessionId, i.startWord)
+      if (at == null) continue
+      this.db.update(schema.insights).set({ spokenAt: at })
+        .where(eq(schema.insights.id, i.id)).run()
+      filled++
+    }
+    if (filled > 0) console.log(`backfilled spoken_at for ${filled}/${pending.length} insight(s)`)
+  }
+
+  /** The spoken moment for an insight, absolute epoch ms = session start +
+   * the word's offset into the recording. Stored on the insight (evidence
+   * layer). Returns null when the transcript or word timing can't be resolved
+   * — callers leave the column null and the ocean falls back to accept time. */
+  private spokenAtOf(sessionId: string, startWord: number): number | null {
+    const session = this.db.select().from(schema.sessions)
+      .where(eq(schema.sessions.id, sessionId)).get()
+    if (!session) return null
+    try {
+      const transcript = loadTranscript(this.transcriptPath(sessionId))
+      for (let i = Math.max(0, startWord); i < transcript.words.length; i++) {
+        const start = transcript.words[i]?.start
+        if (start != null) return session.createdAt + Math.round(start * 1000)
+      }
+    } catch { /* no transcript on disk */ }
+    return null
+  }
+
+  /** The ocean: every snippet, newest-spoken first. Each is enriched with its
+   * source insight's live evidence (quote + supporting quotes) and a link
+   * back to the conversation. With `q`, results are fuzzy-ranked over title,
+   * description, and the resolved quote text (backend Fuse — one search seam,
+   * the client never holds the corpus). A snippet whose source insight has
+   * since been removed still lists, with a null link (it's independent once
+   * born); only a full session delete takes its snippets with it. */
+  listSnippets(q?: string) {
+    const enriched = this.db.select().from(schema.snippets).all().map((s) => {
+      const insight = this.db.select().from(schema.insights)
+        .where(eq(schema.insights.id, s.sourceInsightId)).get()
+      const supports = insight
+        ? this.db.select().from(schema.supportingQuotes)
+          .where(eq(schema.supportingQuotes.insightId, insight.id)).all()
+        : []
+      const session = insight
+        ? this.db.select().from(schema.sessions)
+          .where(eq(schema.sessions.id, insight.sessionId)).get()
+        : undefined
+      const quoteText = [insight?.quote, ...supports.map((x) => x.quote)]
+        .filter(Boolean).join('  ')
+      // The birthday lives on the source insight; a snippet whose source is
+      // gone falls back to when it was accepted into the ocean.
+      const spokenAt = insight?.spokenAt ?? s.createdAt
+      return {
+        id: s.id,
+        title: s.title,
+        description: s.description,
+        spokenAt,
+        createdAt: s.createdAt,
+        sourceInsightId: s.sourceInsightId,
+        sessionId: insight?.sessionId ?? null,
+        sessionTitle: session?.title ?? null,
+        quote: insight?.quote ?? null,
+        quoteText,
+      }
+    }).sort((a, b) => b.spokenAt - a.spokenAt)
+
+    const query = q?.trim()
+    if (!query) return enriched
+    const fuse = new Fuse(enriched, {
+      keys: [
+        { name: 'title', weight: 2 },
+        { name: 'description', weight: 1.5 },
+        { name: 'quoteText', weight: 1 },
+      ],
+      threshold: 0.4,
+      ignoreLocation: true,
+    })
+    return fuse.search(query).map((r) => r.item)
   }
 
   async export(id: string): Promise<ExportReport> {
     const report = await exportSession(this.config, this.db, id)
     this.emit({ type: 'session', sessionId: id })
     return report
+  }
+
+  /** Export the currently-filtered ocean as a downloadable zip. `q` is the
+   * same fuzzy query the ocean list uses, so the archive holds exactly the
+   * snippets on screen — one flat note each, snippet text for the note,
+   * evidence resolved through the source insight (see exportOcean in the
+   * exporter). */
+  async exportOcean(q?: string): Promise<OceanExport> {
+    const items = this.listSnippets(q).map((s) => ({
+      snippetId: s.id,
+      sourceInsightId: s.sourceInsightId,
+      title: s.title,
+      description: s.description,
+    }))
+    return exportOcean(this.config, this.db, items)
   }
 
   /** Wipes every row and file belonging to a session. Used both by the
@@ -369,6 +535,9 @@ export class HarvesterService {
       .where(eq(schema.insights.sessionId, id)).all().map((r) => r.id)
     for (const insightId of insightIds) {
       this.db.delete(schema.supportingQuotes).where(eq(schema.supportingQuotes.insightId, insightId)).run()
+      // A full session wipe takes the snippets it sourced with it — otherwise
+      // they'd dangle with no conversation to travel back to.
+      this.db.delete(schema.snippets).where(eq(schema.snippets.sourceInsightId, insightId)).run()
     }
     const spanIds = this.db.select({ id: schema.harvestSpans.id }).from(schema.harvestSpans)
       .where(eq(schema.harvestSpans.sessionId, id)).all().map((r) => r.id)

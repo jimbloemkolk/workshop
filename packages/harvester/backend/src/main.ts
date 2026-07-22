@@ -24,6 +24,8 @@ async function main(): Promise<void> {
       const { CallService, loadCallConfig } = await import('@workshop/harvester-call')
       const db = openDb(config.dataDir)
       const service = new HarvesterService(config, db)
+      service.backfillSpokenAt() // migration 0003's disk-reading half — see method
+
       // no LIVEKIT_URL → no call plugin → the harvester can still review,
       // label, harvest and export existing sessions, but cannot start a new
       // recording (solo or two-party) — both now go through LiveKit.

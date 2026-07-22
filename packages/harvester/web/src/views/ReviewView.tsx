@@ -29,7 +29,6 @@ export function ReviewView({ detail, refresh, onError }: {
   const [selected, setSelected] = useState<number | null>(null)
   const [newMode, setNewMode] = useState<{ start: number | null }>({ start: null })
   const [newModeOn, setNewModeOn] = useState(false)
-  const [report, setReport] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -160,22 +159,10 @@ export function ReviewView({ detail, refresh, onError }: {
     } catch (e) { onError(String(e)) } finally { setBusy(false) }
   }
 
-  const doExport = async () => {
-    setBusy(true)
-    try {
-      const r = await api.export(id)
-      setReport(`exported ${r.exported} notes + ${r.clips} clips → ${r.folder}` +
-        (r.warnings.length ? ` · warnings: ${r.warnings.join('; ')}` : ''))
-      refresh()
-    } catch (e) { onError(String(e)) } finally { setBusy(false) }
-  }
-
   const reharvest = async () => {
     if (!confirm('Re-harvest replaces all still-proposed insights. Accepted/rejected survive.')) return
     try { await api.harvest(id) } catch (e) { onError(String(e)) }
   }
-
-  const acceptedCount = insights.filter((i) => i.status === 'accepted').length
 
   // Card order in the pane follows the conversation, not creation/id order —
   // otherwise a just-created selection-snippet (see createFromSelection)
@@ -228,11 +215,7 @@ export function ReviewView({ detail, refresh, onError }: {
               : '+ new insight'}
           </button>
           <button onClick={reharvest}>↻ re-harvest</button>
-          <button className="primary" disabled={busy || acceptedCount === 0} onClick={doExport}>
-            ⇪ export {acceptedCount} to vault
-          </button>
         </div>
-        {report && <p className="report">{report}</p>}
         {insights.length === 0 && <p className="muted">No proposals yet.</p>}
         {sortedInsights.map((i) => (
           <InsightCard

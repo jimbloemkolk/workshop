@@ -119,6 +119,11 @@ button.small { font-size: 0.6rem; padding: 0.3rem 0.6rem; }
 .status-recording { color: var(--danger); }
 .status-interrupted, .status-failed { color: var(--warn); }
 .status-reviewing, .status-exported { color: var(--ok); }
+.status-curated { color: var(--muted); }
+/* A curated conversation is done — dimmed, no longer something to look at
+   directly (its accepted ideas live in the ocean). Still openable. */
+.list li.curated { opacity: 0.55; }
+.list li.curated:hover { opacity: 1; }
 
 /* record */
 .record {
@@ -373,3 +378,56 @@ button.icon-btn {
   position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
   background: transparent;
 }
+
+/* ---- the ocean (snippets) ------------------------------------------------ */
+.nav-ocean { color: var(--accent) !important; }
+
+.ocean-search { margin: 0.5rem 0 0; display: flex; gap: 0.6rem; align-items: stretch; }
+.ocean-input {
+  flex: 1; box-sizing: border-box;
+  font-family: var(--serif); font-size: 1.05rem; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 3px;
+  padding: 0.75rem 1rem;
+}
+.ocean-input::placeholder { color: var(--muted); font-style: italic; }
+.ocean-input:focus { outline: none; border-color: var(--accent); background: var(--paper); }
+.ocean-export { flex-shrink: 0; white-space: nowrap; }
+.ocean-report {
+  margin: 0.7rem 0 0; padding: 0.5rem 0.8rem; cursor: pointer;
+  background: var(--surface); border-left: 3px solid var(--ok); border-radius: 3px;
+  color: var(--ink); font-size: 0.9rem;
+}
+
+/* Override the row-style .list ul/li: the ocean is a stack of cards. */
+.list ul.snippets { margin-top: 1.5rem; border-top: none; display: flex; flex-direction: column; gap: 1rem; }
+.list li.snippet-card {
+  display: block; padding: 1.1rem 1.25rem;
+  border: 1px solid var(--rule); border-left: 3px solid var(--rule); border-radius: 3px;
+  background: var(--surface); cursor: default;
+}
+/* The card is not clickable — only the source link travels back. */
+.list li.snippet-card:hover { background: var(--surface); }
+
+.snippet-title {
+  margin: 0; font-size: 1.2rem; font-weight: 600; color: var(--ink);
+  text-wrap: balance;
+}
+.snippet-desc { margin: 0.4rem 0 0; color: var(--ink); line-height: 1.55; }
+.snippet-quote {
+  margin: 0.7rem 0 0; padding-left: 0.8rem; border-left: 2px solid var(--accent-soft);
+  color: var(--muted); font-style: italic; font-size: 0.95rem;
+}
+.snippet-meta {
+  display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap;
+  margin-top: 0.8rem; font-size: 0.8rem;
+}
+.snippet-meta .spoken { color: var(--muted); font-variant-numeric: tabular-nums; }
+.snippet-meta .muted { margin-left: auto; }
+/* The isolated travel-back affordance: a link-styled button, bottom-right. */
+.snippet-source {
+  margin-left: auto; padding: 0.1rem 0.3rem;
+  background: none; border: none; cursor: pointer;
+  color: var(--accent); font-family: var(--serif); font-style: italic; font-size: 0.8rem;
+  border-radius: 3px;
+}
+.snippet-source:hover { text-decoration: underline; background: var(--accent-soft); }

@@ -86,10 +86,33 @@ export const insights = sqliteTable('insights', {
   insight: text('insight').notNull(),
   /** false = failed verbatim verification; needs human attention */
   anchored: integer('anchored', { mode: 'boolean' }).notNull().default(true),
+  /** the spoken moment, epoch ms: session.createdAt + the first word's offset
+   * into the recording. An evidence-layer fact anchored to the transcript,
+   * like `quote` — precomputed at creation and recomputed when the word range
+   * is edited. Null only when the transcript/timing can't be resolved. The
+   * ocean sorts by this (the snippet's true birthday). */
+  spokenAt: integer('spoken_at'),
   status: text('status').notNull().default('proposed'), // proposed | accepted | rejected
   createdAt: integer('created_at').notNull(),
-  /** vault-relative note path once exported */
-  exportedPath: text('exported_path'),
+})
+
+/** The "ocean" — idea-layer entities. Distinct
+ * from the audio-clip `SnippetPlayer` component (evidence-layer playback):
+ * a snippet owns *meaning*, not evidence — just its title and description.
+ * Born when an insight is accepted; title/description are copied from the
+ * source insight at birth and are then free to diverge. Everything else —
+ * the quotes and the spoken moment — stays on the insight and resolves one
+ * hop down via `sourceInsightId`. The ocean is ordered by the source
+ * insight's `spokenAt` (when the words were actually said), not by this
+ * `createdAt` (when it was accepted into the ocean). */
+export const snippets = sqliteTable('snippets', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  /** the single insight this snippet originated from — its source. */
+  sourceInsightId: integer('source_insight_id').notNull(),
+  title: text('title').notNull(),
+  description: text('description').notNull(),
+  /** epoch ms of acceptance into the ocean */
+  createdAt: integer('created_at').notNull(),
 })
 
 export const supportingQuotes = sqliteTable('supporting_quotes', {

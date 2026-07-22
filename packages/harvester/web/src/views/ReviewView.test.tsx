@@ -30,7 +30,6 @@ function insight(overrides: Partial<Insight>): Insight {
     insight: '',
     anchored: true,
     status: 'proposed',
-    exportedPath: null,
     supporting: [],
     ...overrides,
   }
@@ -107,7 +106,7 @@ function makeDetail(insights: Insight[]): SessionDetail {
   return {
     session: {
       id: 'test-session', title: 'Test session', status: 'reviewing',
-      origin: 'local', createdAt: 0, durationS: 400, error: null,
+      origin: 'local', createdAt: 0, durationS: 400, error: null, curated: false,
     },
     participants: [],
     speakers: [],

@@ -15,7 +15,9 @@ export interface NoteQuote {
 
 export interface InsightNoteInput {
   sessionId: string
-  sessionNote: string // wikilink target of the session note
+  /** wikilink target of the session note; omitted by the flat ocean export,
+   * which writes no session.md — the "Session: [[…]]" backlink is then skipped */
+  sessionNote?: string
   date: string
   origin: string
   /** rendered as the H1; the filename carries its slug */
@@ -24,6 +26,9 @@ export interface InsightNoteInput {
   insight: string
   clipFile: string | null // vault-folder-relative path of the clip
   supporting: (NoteQuote & { why: string })[]
+  /** frontmatter tags; defaults to the per-insight tag. The ocean export
+   * passes `harvester/snippet` so idea-layer notes are queryable apart. */
+  tags?: string[]
 }
 
 function yamlEscape(v: string): string {
@@ -47,7 +52,7 @@ export function renderInsightNote(input: InsightNoteInput): string {
     input.main.startS != null ? `start: "${formatTime(input.main.startS)}"` : null,
     input.main.endS != null ? `end: "${formatTime(input.main.endS)}"` : null,
     'tags:',
-    '  - harvester/insight',
+    ...(input.tags ?? ['harvester/insight']).map((t) => `  - ${t}`),
     '---',
   ].filter((l): l is string => l !== null)
 
@@ -69,7 +74,8 @@ export function renderInsightNote(input: InsightNoteInput): string {
     }
     body.push('')
   }
-  body.push(`Session: [[${input.sessionNote}]]`, '', OWNED_MARKER, '')
+  if (input.sessionNote) body.push(`Session: [[${input.sessionNote}]]`, '')
+  body.push(OWNED_MARKER, '')
   return body.join('\n')
 }
 

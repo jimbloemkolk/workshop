@@ -68,9 +68,11 @@ export function SessionList({ sessions, onOpen, onStart, onStartCall, onImport, 
       {sessions.length === 0 && <p className="muted">No sessions yet.</p>}
       <ul>
         {rest.map((s) => (
-          <li key={s.id} onClick={() => onOpen(s.id)}>
+          <li key={s.id} className={s.curated ? 'curated' : undefined} onClick={() => onOpen(s.id)}>
             <span className="title">{s.title}</span>
-            <span className={`status status-${s.status}`}>{s.status}</span>
+            <span className={`status status-${s.curated ? 'curated' : s.status}`}>
+              {s.curated ? 'curated' : s.status}
+            </span>
             <span className="muted">
               {new Date(s.createdAt).toLocaleString()} · {fmtTime(s.durationS)}
             </span>

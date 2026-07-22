@@ -9,14 +9,13 @@ import { callPlugin, registerCallSocket, type CallService } from '@workshop/harv
 import { packageRoot, type Config } from './config.js'
 import type { HarvesterService } from './service.js'
 
-// The @fastify/static and @fastify/multipart augmentations don't merge under
-// this repo's hoist=false layout; declare the members we use ourselves.
+// @fastify/static's sendFile augmentation doesn't reliably merge under this
+// repo's hoist=false layout; declare it ourselves (harmless overload where it
+// does merge). @fastify/multipart's request.file() now merges via the import
+// above, so it no longer needs a manual declaration.
 declare module 'fastify' {
   interface FastifyReply {
     sendFile(filename: string, rootPath?: string): FastifyReply
-  }
-  interface FastifyRequest {
-    file(): Promise<{ filename: string; file: NodeJS.ReadableStream } | undefined>
   }
 }
 
@@ -130,6 +129,25 @@ export async function startServer(
     const { insightId } = req.params as { insightId: string }
     service.updateInsight(Number(insightId), req.body as Parameters<HarvesterService['updateInsight']>[1])
     return { ok: true }
+  })
+
+  app.get('/api/snippets', async (req) => {
+    const { q } = req.query as { q?: string }
+    return service.listSnippets(q)
+  })
+
+  // Export the filtered ocean as a downloadable zip — the counterpart to the
+  // retired per-session export button, now driven from the Ocean page. The
+  // body is the archive; counts/warnings ride an out-of-band header the client
+  // reads for its toast (a binary response can't also carry a JSON body).
+  app.post('/api/ocean/export', async (req, reply) => {
+    const { q } = req.query as { q?: string }
+    const { archive, filename, exported, clips, warnings } = await service.exportOcean(q)
+    return reply
+      .type('application/zip')
+      .header('Content-Disposition', `attachment; filename="${filename}"`)
+      .header('X-Export-Report', encodeURIComponent(JSON.stringify({ filename, exported, clips, warnings })))
+      .send(archive)
   })
 
   app.post('/api/sessions/:id/export', async (req) => {
