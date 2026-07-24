@@ -34,14 +34,14 @@ export class HarvesterService {
 
   listSessions() {
     const sessions = this.db.select().from(schema.sessions).all()
-    // "curated" = fully reviewed: a post-harvest session with no insight still
+    // "curated" = fully reviewed: a post-harvest session with no snippet still
     // `proposed` (every one accepted or rejected). Derived, not stored — it
     // flips the moment the last verdict lands, and flips back if a re-harvest
     // proposes more. The list dims these; a curated conversation is no longer
     // something to look at directly (its accepted ideas live in the ocean now).
     const stillProposed = new Set(
-      this.db.select({ sessionId: schema.insights.sessionId }).from(schema.insights)
-        .where(eq(schema.insights.status, 'proposed')).all().map((r) => r.sessionId),
+      this.db.select({ sessionId: schema.snippets.sessionId }).from(schema.snippets)
+        .where(eq(schema.snippets.status, 'proposed')).all().map((r) => r.sessionId),
     )
     return sessions
       .map((s) => ({
@@ -55,12 +55,12 @@ export class HarvesterService {
     const session = this.db.select().from(schema.sessions)
       .where(eq(schema.sessions.id, id)).get()
     if (!session) throw new Error(`unknown session: ${id}`)
-    const insights = this.db.select().from(schema.insights)
-      .where(eq(schema.insights.sessionId, id)).all()
+    const snippets = this.db.select().from(schema.snippets)
+      .where(eq(schema.snippets.sessionId, id)).all()
     const supports = new Map<number, unknown[]>()
-    for (const i of insights) {
-      supports.set(i.id, this.db.select().from(schema.supportingQuotes)
-        .where(eq(schema.supportingQuotes.insightId, i.id)).all())
+    for (const s of snippets) {
+      supports.set(s.id, this.db.select().from(schema.supportingQuotes)
+        .where(eq(schema.supportingQuotes.snippetId, s.id)).all())
     }
     const harvestSpans = this.db.select().from(schema.harvestSpans)
       .where(eq(schema.harvestSpans.sessionId, id)).all()
@@ -80,7 +80,7 @@ export class HarvesterService {
           .where(eq(schema.harvestSpanMembers.harvestSpanId, s.id)).all()
           .map((m) => m.markerId),
       })),
-      insights: insights.map((i) => ({ ...i, supporting: supports.get(i.id) ?? [] })),
+      snippets: snippets.map((s) => ({ ...s, supporting: supports.get(s.id) ?? [] })),
       hasTranscript: fs.existsSync(this.transcriptPath(id)),
     }
   }
@@ -210,12 +210,12 @@ export class HarvesterService {
     try {
       const outcome = await runHarvest(agent, transcript, this.speakerNames(id), spans, gaps,
         (p) => this.emit({ type: 'harvest', sessionId: id, ...p }))
-      // Re-harvest replaces prior *proposed* insights; human verdicts survive.
-      const stale = this.db.select().from(schema.insights)
-        .where(and(eq(schema.insights.sessionId, id), eq(schema.insights.status, 'proposed'))).all()
+      // Re-harvest replaces prior *proposed* snippets; human verdicts survive.
+      const stale = this.db.select().from(schema.snippets)
+        .where(and(eq(schema.snippets.sessionId, id), eq(schema.snippets.status, 'proposed'))).all()
       for (const s of stale) {
-        this.db.delete(schema.supportingQuotes).where(eq(schema.supportingQuotes.insightId, s.id)).run()
-        this.db.delete(schema.insights).where(eq(schema.insights.id, s.id)).run()
+        this.db.delete(schema.supportingQuotes).where(eq(schema.supportingQuotes.snippetId, s.id)).run()
+        this.db.delete(schema.snippets).where(eq(schema.snippets.id, s.id)).run()
       }
       for (const proposal of outcome.proposals) this.storeProposal(id, harvest.id, proposal)
       this.db.update(schema.harvests).set({
@@ -233,7 +233,7 @@ export class HarvesterService {
     }
   }
 
-  async manualInsight(id: string, startWord: number, endWord: number): Promise<void> {
+  async manualSnippet(id: string, startWord: number, endWord: number): Promise<void> {
     const transcript = loadTranscript(this.transcriptPath(id))
     if (startWord < 0 || endWord > transcript.words.length || endWord <= startWord) {
       throw new Error('invalid word range')
@@ -257,7 +257,7 @@ export class HarvesterService {
   }
 
   /** Merged mark regions: wiped and re-derived on each harvest (never
-   * touching raw markers), persisted so insights can link back through
+   * touching raw markers), persisted so snippets can link back through
    * harvest_span_members. One code path — local sessions derive trivially. */
   private deriveHarvestSpans(id: string): SpanInput[] {
     const markerRows = this.db.select().from(schema.markers)
@@ -307,7 +307,7 @@ export class HarvesterService {
   }
 
   private storeProposal(sessionId: string, harvestId: number | null, p: Proposal): void {
-    const row = this.db.insert(schema.insights).values({
+    const row = this.db.insert(schema.snippets).values({
       sessionId,
       harvestId,
       origin: p.origin,
@@ -316,7 +316,7 @@ export class HarvesterService {
       startWord: p.main.range.start,
       endWord: p.main.range.end,
       quote: p.main.quote,
-      insight: p.insight,
+      note: p.note,
       anchored: p.main.anchored,
       spokenAt: this.spokenAtOf(sessionId, p.main.range.start),
       status: 'proposed',
@@ -324,7 +324,7 @@ export class HarvesterService {
     }).returning().get()
     for (const s of p.supporting) {
       this.db.insert(schema.supportingQuotes).values({
-        insightId: row.id,
+        snippetId: row.id,
         startWord: s.range.start,
         endWord: s.range.end,
         quote: s.quote,
@@ -336,26 +336,26 @@ export class HarvesterService {
 
   // ---- review --------------------------------------------------------------
 
-  updateInsight(insightId: number, patch: {
+  updateSnippet(snippetId: number, patch: {
     status?: 'proposed' | 'accepted' | 'rejected'
     startWord?: number
     endWord?: number
     title?: string
-    insight?: string
+    note?: string
   }): void {
-    const insight = this.db.select().from(schema.insights)
-      .where(eq(schema.insights.id, insightId)).get()
-    if (!insight) throw new Error(`unknown insight: ${insightId}`)
+    const snippet = this.db.select().from(schema.snippets)
+      .where(eq(schema.snippets.id, snippetId)).get()
+    if (!snippet) throw new Error(`unknown snippet: ${snippetId}`)
 
-    const values: Partial<typeof schema.insights.$inferInsert> = {}
+    const values: Partial<typeof schema.snippets.$inferInsert> = {}
     if (patch.status) values.status = patch.status
     if (patch.title != null) values.title = patch.title.trim()
-    if (patch.insight != null) values.insight = patch.insight.trim()
+    if (patch.note != null) values.note = patch.note.trim()
 
     if (patch.startWord != null || patch.endWord != null) {
-      const transcript = loadTranscript(this.transcriptPath(insight.sessionId))
-      const start = patch.startWord ?? insight.startWord
-      const end = patch.endWord ?? insight.endWord
+      const transcript = loadTranscript(this.transcriptPath(snippet.sessionId))
+      const start = patch.startWord ?? snippet.startWord
+      const end = patch.endWord ?? snippet.endWord
       if (start < 0 || end > transcript.words.length || end <= start) {
         throw new Error('invalid word range')
       }
@@ -365,50 +365,51 @@ export class HarvesterService {
       values.quote = verbatim(transcript.words, { start, end })
       values.anchored = true
       // Moving the range moves the spoken moment — recompute the birthday.
-      values.spokenAt = this.spokenAtOf(insight.sessionId, start)
+      values.spokenAt = this.spokenAtOf(snippet.sessionId, start)
     }
 
     // Backfill lazily: rows created before this column (or seeded without a
     // transcript on hand) get their spoken moment the first time they're
     // touched, so the ocean can sort them by when the words were said.
-    if (values.spokenAt == null && insight.spokenAt == null) {
-      const at = this.spokenAtOf(insight.sessionId, insight.startWord)
+    if (values.spokenAt == null && snippet.spokenAt == null) {
+      const at = this.spokenAtOf(snippet.sessionId, snippet.startWord)
       if (at != null) values.spokenAt = at
     }
 
-    this.db.update(schema.insights).set(values)
-      .where(eq(schema.insights.id, insightId)).run()
+    this.db.update(schema.snippets).set(values)
+      .where(eq(schema.snippets.id, snippetId)).run()
 
-    // Accepting an insight is what "moves it into the ocean": a snippet is
-    // born, once, on the transition to accepted. Copy title/description from
-    // the insight's final state (this same patch may have edited them); from
-    // then on the snippet is free to diverge and the insight stays the source.
-    if (patch.status === 'accepted' && insight.status !== 'accepted') {
-      this.ensureSnippet(
-        { id: insight.id },
-        values.title ?? insight.title,
-        values.insight ?? insight.insight,
+    // Accepting a snippet is what "moves it into the ocean": an insight is
+    // born, once, on the transition to accepted. Its title/description are
+    // copied from the snippet's final state (this same patch may have edited
+    // them) — the snippet's `note` seeds the insight's description; from then
+    // on the insight is free to diverge and the snippet stays its source.
+    if (patch.status === 'accepted' && snippet.status !== 'accepted') {
+      this.ensureInsight(
+        { id: snippet.id },
+        values.title ?? snippet.title,
+        values.note ?? snippet.note,
       )
     }
 
-    this.emit({ type: 'session', sessionId: insight.sessionId })
+    this.emit({ type: 'session', sessionId: snippet.sessionId })
   }
 
-  // ---- snippets (the ocean) ------------------------------------------------
+  // ---- insights (the ocean) ------------------------------------------------
 
-  /** Born once per source insight. Idempotent: re-accepting (or accepting an
-   * insight that already spawned a snippet, e.g. after an un-accept round
-   * trip) never clobbers an edited snippet. */
-  private ensureSnippet(
-    insight: { id: number },
+  /** Born once per source snippet. Idempotent: re-accepting (or accepting a
+   * snippet that already spawned an insight, e.g. after an un-accept round
+   * trip) never clobbers an edited insight. */
+  private ensureInsight(
+    snippet: { id: number },
     title: string,
     description: string,
   ): void {
-    const existing = this.db.select().from(schema.snippets)
-      .where(eq(schema.snippets.sourceInsightId, insight.id)).get()
+    const existing = this.db.select().from(schema.insights)
+      .where(eq(schema.insights.sourceSnippetId, snippet.id)).get()
     if (existing) return
-    this.db.insert(schema.snippets).values({
-      sourceInsightId: insight.id,
+    this.db.insert(schema.insights).values({
+      sourceSnippetId: snippet.id,
       title,
       description,
       createdAt: Date.now(),
@@ -421,24 +422,24 @@ export class HarvesterService {
    * boot right after migrations. Only null rows are touched — a no-op on every
    * boot after the first, and self-healing if a transcript arrives later. */
   backfillSpokenAt(): void {
-    const pending = this.db.select().from(schema.insights)
-      .where(isNull(schema.insights.spokenAt)).all()
+    const pending = this.db.select().from(schema.snippets)
+      .where(isNull(schema.snippets.spokenAt)).all()
     if (pending.length === 0) return
     let filled = 0
-    for (const i of pending) {
-      const at = this.spokenAtOf(i.sessionId, i.startWord)
+    for (const s of pending) {
+      const at = this.spokenAtOf(s.sessionId, s.startWord)
       if (at == null) continue
-      this.db.update(schema.insights).set({ spokenAt: at })
-        .where(eq(schema.insights.id, i.id)).run()
+      this.db.update(schema.snippets).set({ spokenAt: at })
+        .where(eq(schema.snippets.id, s.id)).run()
       filled++
     }
-    if (filled > 0) console.log(`backfilled spoken_at for ${filled}/${pending.length} insight(s)`)
+    if (filled > 0) console.log(`backfilled spoken_at for ${filled}/${pending.length} snippet(s)`)
   }
 
-  /** The spoken moment for an insight, absolute epoch ms = session start +
-   * the word's offset into the recording. Stored on the insight (evidence
-   * layer). Returns null when the transcript or word timing can't be resolved
-   * — callers leave the column null and the ocean falls back to accept time. */
+  /** The spoken moment for a snippet, absolute epoch ms = session start +
+   * the word's offset into the recording. Stored on the snippet (the atom).
+   * Returns null when the transcript or word timing can't be resolved —
+   * callers leave the column null and the ocean falls back to accept time. */
   private spokenAtOf(sessionId: string, startWord: number): number | null {
     const session = this.db.select().from(schema.sessions)
       .where(eq(schema.sessions.id, sessionId)).get()
@@ -453,40 +454,40 @@ export class HarvesterService {
     return null
   }
 
-  /** The ocean: every snippet, newest-spoken first. Each is enriched with its
-   * source insight's live evidence (quote + supporting quotes) and a link
+  /** The ocean: every insight, newest-spoken first. Each is enriched with its
+   * source snippet's live evidence (quote + supporting quotes) and a link
    * back to the conversation. With `q`, results are fuzzy-ranked over title,
    * description, and the resolved quote text (backend Fuse — one search seam,
-   * the client never holds the corpus). A snippet whose source insight has
+   * the client never holds the corpus). An insight whose source snippet has
    * since been removed still lists, with a null link (it's independent once
-   * born); only a full session delete takes its snippets with it. */
-  listSnippets(q?: string) {
-    const enriched = this.db.select().from(schema.snippets).all().map((s) => {
-      const insight = this.db.select().from(schema.insights)
-        .where(eq(schema.insights.id, s.sourceInsightId)).get()
-      const supports = insight
+   * born); only a full session delete takes its insights with it. */
+  listInsights(q?: string) {
+    const enriched = this.db.select().from(schema.insights).all().map((ins) => {
+      const snippet = this.db.select().from(schema.snippets)
+        .where(eq(schema.snippets.id, ins.sourceSnippetId)).get()
+      const supports = snippet
         ? this.db.select().from(schema.supportingQuotes)
-          .where(eq(schema.supportingQuotes.insightId, insight.id)).all()
+          .where(eq(schema.supportingQuotes.snippetId, snippet.id)).all()
         : []
-      const session = insight
+      const session = snippet
         ? this.db.select().from(schema.sessions)
-          .where(eq(schema.sessions.id, insight.sessionId)).get()
+          .where(eq(schema.sessions.id, snippet.sessionId)).get()
         : undefined
-      const quoteText = [insight?.quote, ...supports.map((x) => x.quote)]
+      const quoteText = [snippet?.quote, ...supports.map((x) => x.quote)]
         .filter(Boolean).join('  ')
-      // The birthday lives on the source insight; a snippet whose source is
+      // The birthday lives on the source snippet; an insight whose source is
       // gone falls back to when it was accepted into the ocean.
-      const spokenAt = insight?.spokenAt ?? s.createdAt
+      const spokenAt = snippet?.spokenAt ?? ins.createdAt
       return {
-        id: s.id,
-        title: s.title,
-        description: s.description,
+        id: ins.id,
+        title: ins.title,
+        description: ins.description,
         spokenAt,
-        createdAt: s.createdAt,
-        sourceInsightId: s.sourceInsightId,
-        sessionId: insight?.sessionId ?? null,
+        createdAt: ins.createdAt,
+        sourceSnippetId: ins.sourceSnippetId,
+        sessionId: snippet?.sessionId ?? null,
         sessionTitle: session?.title ?? null,
-        quote: insight?.quote ?? null,
+        quote: snippet?.quote ?? null,
         quoteText,
       }
     }).sort((a, b) => b.spokenAt - a.spokenAt)
@@ -513,15 +514,15 @@ export class HarvesterService {
 
   /** Export the currently-filtered ocean as a downloadable zip. `q` is the
    * same fuzzy query the ocean list uses, so the archive holds exactly the
-   * snippets on screen — one flat note each, snippet text for the note,
-   * evidence resolved through the source insight (see exportOcean in the
+   * insights on screen — one flat note each, insight text for the note,
+   * evidence resolved through the source snippet (see exportOcean in the
    * exporter). */
   async exportOcean(q?: string): Promise<OceanExport> {
-    const items = this.listSnippets(q).map((s) => ({
-      snippetId: s.id,
-      sourceInsightId: s.sourceInsightId,
-      title: s.title,
-      description: s.description,
+    const items = this.listInsights(q).map((ins) => ({
+      insightId: ins.id,
+      sourceSnippetId: ins.sourceSnippetId,
+      title: ins.title,
+      description: ins.description,
     }))
     return exportOcean(this.config, this.db, items)
   }
@@ -531,20 +532,20 @@ export class HarvesterService {
    * nothing worth keeping. */
   deleteSession(id: string): void {
     this.mustGet(id)
-    const insightIds = this.db.select({ id: schema.insights.id }).from(schema.insights)
-      .where(eq(schema.insights.sessionId, id)).all().map((r) => r.id)
-    for (const insightId of insightIds) {
-      this.db.delete(schema.supportingQuotes).where(eq(schema.supportingQuotes.insightId, insightId)).run()
-      // A full session wipe takes the snippets it sourced with it — otherwise
+    const snippetIds = this.db.select({ id: schema.snippets.id }).from(schema.snippets)
+      .where(eq(schema.snippets.sessionId, id)).all().map((r) => r.id)
+    for (const snippetId of snippetIds) {
+      this.db.delete(schema.supportingQuotes).where(eq(schema.supportingQuotes.snippetId, snippetId)).run()
+      // A full session wipe takes the insights it sourced with it — otherwise
       // they'd dangle with no conversation to travel back to.
-      this.db.delete(schema.snippets).where(eq(schema.snippets.sourceInsightId, insightId)).run()
+      this.db.delete(schema.insights).where(eq(schema.insights.sourceSnippetId, snippetId)).run()
     }
     const spanIds = this.db.select({ id: schema.harvestSpans.id }).from(schema.harvestSpans)
       .where(eq(schema.harvestSpans.sessionId, id)).all().map((r) => r.id)
     for (const spanId of spanIds) {
       this.db.delete(schema.harvestSpanMembers).where(eq(schema.harvestSpanMembers.harvestSpanId, spanId)).run()
     }
-    this.db.delete(schema.insights).where(eq(schema.insights.sessionId, id)).run()
+    this.db.delete(schema.snippets).where(eq(schema.snippets.sessionId, id)).run()
     this.db.delete(schema.harvestSpans).where(eq(schema.harvestSpans.sessionId, id)).run()
     this.db.delete(schema.harvests).where(eq(schema.harvests.sessionId, id)).run()
     this.db.delete(schema.markers).where(eq(schema.markers.sessionId, id)).run()

@@ -148,11 +148,11 @@ export async function runCallE2e(baseConfig: Config, opts: { noLlm: boolean }): 
     const duration = await ffprobeDuration(master).catch(() => 0)
     check(`playback master playable (${duration.toFixed(1)}s)`, duration > 10)
 
-    const insights = db.select().from(schema.insights)
-      .where(eq(schema.insights.sessionId, sessionId)).all()
-    check(`harvest produced insights (${insights.length})`, insights.length >= 1)
-    check('marker insights link their harvest span',
-      insights.filter((i) => i.origin === 'marker').every((i) => i.harvestSpanId != null))
+    const snippets = db.select().from(schema.snippets)
+      .where(eq(schema.snippets.sessionId, sessionId)).all()
+    check(`harvest produced snippets (${snippets.length})`, snippets.length >= 1)
+    check('marker snippets link their harvest span',
+      snippets.filter((s) => s.origin === 'marker').every((s) => s.harvestSpanId != null))
 
     return finish()
   } catch (err) {
@@ -260,9 +260,9 @@ export async function runTableE2e(baseConfig: Config, opts: { noLlm: boolean }):
     speakers.forEach((s, i) => service.assignSpeaker(sessionId, s.label, i === 0 ? p1.id : p2.id))
 
     await service.harvestSession(sessionId, { fixture: opts.noLlm })
-    const insights = db.select().from(schema.insights)
-      .where(eq(schema.insights.sessionId, sessionId)).all()
-    check(`harvest produced insights (${insights.length})`, insights.length >= 1)
+    const snippets = db.select().from(schema.snippets)
+      .where(eq(schema.snippets.sessionId, sessionId)).all()
+    check(`harvest produced snippets (${snippets.length})`, snippets.length >= 1)
 
     const markers = db.select().from(schema.markers)
       .where(eq(schema.markers.sessionId, sessionId)).all()

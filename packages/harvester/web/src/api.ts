@@ -63,7 +63,10 @@ export interface SupportingQuote {
   anchored: boolean
 }
 
-export interface Insight {
+/** A snippet: the verbatim atom you review — a literal quote plus its
+ * anchoring. `note` is the harvester's interpretive gloss (seeds an insight's
+ * description at accept). */
+export interface Snippet {
   id: number
   origin: 'marker' | 'sweep' | 'manual'
   harvestSpanId: number | null
@@ -71,22 +74,22 @@ export interface Insight {
   startWord: number
   endWord: number
   quote: string
-  insight: string
+  note: string
   anchored: boolean
   status: 'proposed' | 'accepted' | 'rejected'
   supporting: SupportingQuote[]
 }
 
-/** An ocean entry. `title`/`description` are the snippet's own (diverge-able)
- * copy; `quote`/`sessionId`/`sessionTitle` are resolved live from the source
- * insight and are null once that source has been removed. */
-export interface Snippet {
+/** An ocean entry — an insight: the refined idea. `title`/`description` are
+ * its own (diverge-able) copy; `quote`/`sessionId`/`sessionTitle` are resolved
+ * live from the source snippet and are null once that source has been removed. */
+export interface Insight {
   id: number
   title: string
   description: string
   spokenAt: number
   createdAt: number
-  sourceInsightId: number
+  sourceSnippetId: number
   sessionId: string | null
   sessionTitle: string | null
   quote: string | null
@@ -108,7 +111,7 @@ export interface SessionDetail {
   markers: Marker[]
   gaps: Gap[]
   harvestSpans: HarvestSpan[]
-  insights: Insight[]
+  snippets: Snippet[]
   hasTranscript: boolean
 }
 
@@ -160,15 +163,15 @@ export const api = {
     request<SessionDetail>('POST', `/api/sessions/${id}/speakers`, { label, participantId }),
   harvest: (id: string, fixture = false) =>
     request<{ started: boolean }>('POST', `/api/sessions/${id}/harvest`, { fixture }),
-  manualInsight: (id: string, startWord: number, endWord: number) =>
-    request<SessionDetail>('POST', `/api/sessions/${id}/insights`, { startWord, endWord }),
-  updateInsight: (insightId: number, patch: Partial<Pick<Insight, 'status' | 'startWord' | 'endWord' | 'title' | 'insight'>>) =>
-    request<{ ok: boolean }>('PATCH', `/api/insights/${insightId}`, patch),
+  manualSnippet: (id: string, startWord: number, endWord: number) =>
+    request<SessionDetail>('POST', `/api/sessions/${id}/snippets`, { startWord, endWord }),
+  updateSnippet: (snippetId: number, patch: Partial<Pick<Snippet, 'status' | 'startWord' | 'endWord' | 'title' | 'note'>>) =>
+    request<{ ok: boolean }>('PATCH', `/api/snippets/${snippetId}`, patch),
   export: (id: string) =>
     request<{ folder: string; exported: number; clips: number; warnings: string[] }>(
       'POST', `/api/sessions/${id}/export`),
-  snippets: (q?: string) =>
-    request<Snippet[]>('GET', `/api/snippets${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  insights: (q?: string) =>
+    request<Insight[]>('GET', `/api/insights${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   // The ocean export is a file download, not JSON: POST, save the returned
   // zip via a transient object URL, and read the counts/warnings off the
   // out-of-band header for the caller's toast.

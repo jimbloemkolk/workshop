@@ -31,7 +31,10 @@ export interface Proposal {
   harvestSpanId?: number
   title: string
   main: ProposedQuote
-  insight: string
+  /** the harvester's interpretive gloss, stored as the snippet's `note`. The
+   * LLM's JSON reply still calls this `insight` (see RawMarkerReply) — the
+   * rename stops at the parse boundary so the prompt/model are untouched. */
+  note: string
   supporting: ProposedSupport[]
 }
 
@@ -144,7 +147,7 @@ export async function runManualTurn(
       origin: 'manual',
       title: reply.title?.trim() || quote.split(/\s+/).slice(0, 6).join(' '),
       main: { range, quote, anchored: true },
-      insight: reply.insight?.trim() || '',
+      note: reply.insight?.trim() || '',
       supporting,
     },
   }
@@ -185,7 +188,7 @@ async function buildProposal(
           ...base,
           title: current.title?.trim() || anchor.quote.split(/\s+/).slice(0, 6).join(' '),
           main: { range: anchor.range, quote: anchor.quote, anchored: true, anchorNote: anchor.reason },
-          insight: current.insight?.trim() || '',
+          note: current.insight?.trim() || '',
           supporting: anchorSupports(transcript, current.supporting ?? []),
         },
       }
@@ -209,7 +212,7 @@ async function buildProposal(
             anchored: false,
             anchorNote: anchor.reason,
           },
-          insight: current.insight?.trim() || '',
+          note: current.insight?.trim() || '',
           supporting: anchorSupports(transcript, current.supporting ?? []),
         },
       }

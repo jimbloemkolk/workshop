@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, type Snippet } from '../api'
+import { api, type Insight } from '../api'
 import { onServerEvent } from '../socket'
 
-/** The ocean: every accepted snippet, newest-spoken first, with a search box
+/** The ocean: every accepted insight, newest-spoken first, with a search box
  * that fuzzy-matches title, description and the source quote (ranking happens
- * on the backend). Export projects exactly the filtered set into the vault.
- * The source link on each card (bottom-right) travels back to the conversation
- * the snippet originated from — the card itself is not clickable. */
-export function SnippetsView({ onOpenSession }: { onOpenSession: (id: string) => void }) {
+ * on the backend). Export projects exactly the filtered set into a zip. The
+ * source link on each card (bottom-right) travels back to the conversation the
+ * insight originated from — the card itself is not clickable. */
+export function InsightsView({ onOpenSession }: { onOpenSession: (id: string) => void }) {
   const [query, setQuery] = useState('')
-  const [snippets, setSnippets] = useState<Snippet[]>([])
+  const [insights, setInsights] = useState<Insight[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
@@ -20,9 +20,9 @@ export function SnippetsView({ onOpenSession }: { onOpenSession: (id: string) =>
   const reqToken = useRef(0)
   const load = (q: string) => {
     const token = ++reqToken.current
-    api.snippets(q).then((rows) => {
+    api.insights(q).then((rows) => {
       if (token !== reqToken.current) return
-      setSnippets(rows)
+      setInsights(rows)
       setError(null)
     }).catch((e) => {
       if (token !== reqToken.current) return
@@ -38,7 +38,7 @@ export function SnippetsView({ onOpenSession }: { onOpenSession: (id: string) =>
     return () => clearTimeout(t)
   }, [query])
 
-  // A newly accepted insight (or a deleted session) changes the ocean — refetch
+  // A newly accepted snippet (or a deleted session) changes the ocean — refetch
   // for the current query when the server says something moved.
   useEffect(() => onServerEvent((e) => {
     if (e.type === 'session' || e.type === 'session-deleted') load(query)
@@ -68,50 +68,50 @@ export function SnippetsView({ onOpenSession }: { onOpenSession: (id: string) =>
         />
         <button
           className="primary ocean-export"
-          disabled={exporting || snippets.length === 0}
+          disabled={exporting || insights.length === 0}
           onClick={doExport}
-          title={query ? 'download the filtered snippets as a zip' : 'download the whole ocean as a zip'}
+          title={query ? 'download the filtered insights as a zip' : 'download the whole ocean as a zip'}
         >
-          ⇪ download {snippets.length} as zip
+          ⇪ download {insights.length} as zip
         </button>
       </div>
 
       {report && <p className="ocean-report" onClick={() => setReport(null)}>{report}</p>}
       {error && <div className="error" onClick={() => setError(null)}>{error}</div>}
 
-      {!loading && snippets.length === 0 && (
+      {!loading && insights.length === 0 && (
         <p className="muted">
           {query
             ? `Nothing in the ocean matches “${query}”.`
-            : 'The ocean is empty. Accept an insight in a review to drop the first snippet in.'}
+            : 'The ocean is empty. Accept a snippet in a review to drop the first insight in.'}
         </p>
       )}
 
-      <ul className="snippets">
-        {snippets.map((s) => (
-          <SnippetCard key={s.id} snippet={s} onOpenSession={onOpenSession} />
+      <ul className="insights">
+        {insights.map((i) => (
+          <InsightCard key={i.id} insight={i} onOpenSession={onOpenSession} />
         ))}
       </ul>
     </main>
   )
 }
 
-function SnippetCard({ snippet, onOpenSession }: {
-  snippet: Snippet
+function InsightCard({ insight, onOpenSession }: {
+  insight: Insight
   onOpenSession: (id: string) => void
 }) {
-  const { sessionId, sessionTitle, quote } = snippet
+  const { sessionId, sessionTitle, quote } = insight
 
   return (
-    <li className="snippet-card">
-      <h3 className="snippet-title">{snippet.title}</h3>
-      <p className="snippet-desc">{snippet.description}</p>
-      {quote && <blockquote className="snippet-quote">“{quote}”</blockquote>}
-      <div className="snippet-meta">
-        <span className="spoken">{new Date(snippet.spokenAt).toLocaleString()}</span>
+    <li className="insight-card">
+      <h3 className="insight-title">{insight.title}</h3>
+      <p className="insight-desc">{insight.description}</p>
+      {quote && <blockquote className="insight-quote">“{quote}”</blockquote>}
+      <div className="insight-meta">
+        <span className="spoken">{new Date(insight.spokenAt).toLocaleString()}</span>
         {sessionId ? (
           <button
-            className="snippet-source"
+            className="insight-source"
             onClick={() => onOpenSession(sessionId)}
             title="back to the conversation this came from"
           >

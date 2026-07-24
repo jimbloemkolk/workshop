@@ -7,7 +7,7 @@ import { LabelView } from './views/LabelView'
 import { PipelineView } from './views/PipelineView'
 import { ReviewView } from './views/ReviewView'
 import { SessionList } from './views/SessionList'
-import { SnippetsView } from './views/SnippetsView'
+import { InsightsView } from './views/InsightsView'
 
 function hashSession(): string | null {
   const m = /^#\/session\/(.+)$/.exec(location.hash)
@@ -105,7 +105,7 @@ export function App() {
       </header>
       {error && <div className="error" onClick={() => setError(null)}>{error}</div>}
       {ocean ? (
-        <SnippetsView onOpenSession={open} />
+        <InsightsView onOpenSession={open} />
       ) : !current || !detail ? (
         <SessionList
           sessions={sessions}

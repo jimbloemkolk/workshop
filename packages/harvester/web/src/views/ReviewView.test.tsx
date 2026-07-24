@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import type { Insight, SessionDetail } from '../api'
+import type { Snippet, SessionDetail } from '../api'
 import { ReviewView, sortByAppearance } from './ReviewView'
 
 // --- jsdom gaps --------------------------------------------------------------
@@ -18,7 +18,7 @@ beforeAll(() => {
 
 // --- part 1: the pure sort function ------------------------------------------
 
-function insight(overrides: Partial<Insight>): Insight {
+function snippet(overrides: Partial<Snippet>): Snippet {
   return {
     id: 0,
     origin: 'manual',
@@ -27,7 +27,7 @@ function insight(overrides: Partial<Insight>): Insight {
     startWord: 0,
     endWord: 1,
     quote: '',
-    insight: '',
+    note: '',
     anchored: true,
     status: 'proposed',
     supporting: [],
@@ -39,29 +39,29 @@ describe('sortByAppearance', () => {
   it('orders by startWord ascending, scrambled ids included', () => {
     // ids deliberately anti-correlated with startWord: creation order here
     // is exactly the reverse of appearance order.
-    const a = insight({ id: 30, startWord: 10, endWord: 20 })
-    const b = insight({ id: 20, startWord: 150, endWord: 160 })
-    const c = insight({ id: 10, startWord: 300, endWord: 310 })
+    const a = snippet({ id: 30, startWord: 10, endWord: 20 })
+    const b = snippet({ id: 20, startWord: 150, endWord: 160 })
+    const c = snippet({ id: 10, startWord: 300, endWord: 310 })
     expect(sortByAppearance([c, b, a]).map((i) => i.id)).toEqual([30, 20, 10])
   })
 
   it('breaks a startWord tie by endWord', () => {
-    const shorter = insight({ id: 1, startWord: 50, endWord: 55 })
-    const longer = insight({ id: 2, startWord: 50, endWord: 90 })
+    const shorter = snippet({ id: 1, startWord: 50, endWord: 55 })
+    const longer = snippet({ id: 2, startWord: 50, endWord: 90 })
     expect(sortByAppearance([longer, shorter]).map((i) => i.id)).toEqual([1, 2])
   })
 
   it('breaks a startWord+endWord tie by id', () => {
-    const later = insight({ id: 9, startWord: 50, endWord: 55 })
-    const earlier = insight({ id: 3, startWord: 50, endWord: 55 })
+    const later = snippet({ id: 9, startWord: 50, endWord: 55 })
+    const earlier = snippet({ id: 3, startWord: 50, endWord: 55 })
     expect(sortByAppearance([later, earlier]).map((i) => i.id)).toEqual([3, 9])
   })
 
   it('does not mutate its input array', () => {
     const original = [
-      insight({ id: 3, startWord: 300, endWord: 310 }),
-      insight({ id: 2, startWord: 150, endWord: 160 }),
-      insight({ id: 1, startWord: 10, endWord: 20 }),
+      snippet({ id: 3, startWord: 300, endWord: 310 }),
+      snippet({ id: 2, startWord: 150, endWord: 160 }),
+      snippet({ id: 1, startWord: 10, endWord: 20 }),
     ]
     const originalOrderIds = original.map((i) => i.id)
     const sorted = sortByAppearance(original)
@@ -75,7 +75,7 @@ describe('sortByAppearance', () => {
   })
 
   it('handles a single element', () => {
-    const only = insight({ id: 7, startWord: 5, endWord: 6 })
+    const only = snippet({ id: 7, startWord: 5, endWord: 6 })
     expect(sortByAppearance([only])).toEqual([only])
   })
 })
@@ -84,7 +84,7 @@ describe('sortByAppearance', () => {
 // Real `api` module throughout EXCEPT the two async calls that fire on mount:
 // api.transcript (ReviewView's own effect) and api.peaks (the session-bar
 // SnippetPlayer's `full` variant, fetching its loudness waveform). Everything
-// else — fmtTime, audioUrl, manualInsight, etc. — stays the real
+// else — fmtTime, audioUrl, manualSnippet, etc. — stays the real
 // implementation; nothing else is called during a plain mount+read.
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>()
@@ -102,7 +102,7 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-function makeDetail(insights: Insight[]): SessionDetail {
+function makeDetail(snippets: Snippet[]): SessionDetail {
   return {
     session: {
       id: 'test-session', title: 'Test session', status: 'reviewing',
@@ -113,20 +113,20 @@ function makeDetail(insights: Insight[]): SessionDetail {
     markers: [],
     gaps: [],
     harvestSpans: [],
-    insights,
+    snippets,
     hasTranscript: true,
   }
 }
 
 describe('ReviewView (render)', () => {
-  it('renders insight cards in conversation order, not the id order the API returned them in', async () => {
+  it('renders snippet cards in conversation order, not the id order the API returned them in', async () => {
     // id order is the REVERSE of startWord (appearance) order — exactly the
     // "just-created snippet quoting the first sentence lands at the bottom"
     // scenario the sort exists to fix.
     const detail = makeDetail([
-      insight({ id: 10, title: 'Third topic', startWord: 300, endWord: 310 }),
-      insight({ id: 20, title: 'Second topic', startWord: 150, endWord: 160 }),
-      insight({ id: 30, title: 'First topic', startWord: 10, endWord: 20 }),
+      snippet({ id: 10, title: 'Third topic', startWord: 300, endWord: 310 }),
+      snippet({ id: 20, title: 'Second topic', startWord: 150, endWord: 160 }),
+      snippet({ id: 30, title: 'First topic', startWord: 10, endWord: 20 }),
     ])
 
     render(<ReviewView detail={detail} refresh={vi.fn()} onError={vi.fn()} />)

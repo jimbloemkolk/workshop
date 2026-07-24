@@ -36,6 +36,13 @@
       "when": 1784757667120,
       "tag": "0004_windy_lyja",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1784757707120,
+      "tag": "0005_swap_insight_snippet",
+      "breakpoints": true
     }
   ]
 }

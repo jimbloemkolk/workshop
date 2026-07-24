@@ -27,9 +27,9 @@ export interface OceanExport {
   warnings: string[]
 }
 
-/** Project accepted insights into the Obsidian vault: one folder per
- * session, one note per insight, clips alongside. Re-runnable — the vault is
- * a projection, and human regions below the marker survive. */
+/** Project a session's accepted snippets into the Obsidian vault: one folder
+ * per session, one note per snippet, clips alongside. Re-runnable — the vault
+ * is a projection, and human regions below the marker survive. */
 export async function exportSession(config: Config, db: Db, sessionId: string): Promise<ExportReport> {
   if (!config.vaultDir) {
     throw new Error('HARVESTER_VAULT_DIR is not configured (point it at a folder inside your vault)')
@@ -44,8 +44,8 @@ export async function exportSession(config: Config, db: Db, sessionId: string): 
     .where(eq(schema.speakers.sessionId, sessionId)).all()
   const markerRows = db.select().from(schema.markers)
     .where(and(eq(schema.markers.sessionId, sessionId), eq(schema.markers.flag, 'ok'))).all()
-  const accepted = db.select().from(schema.insights)
-    .where(and(eq(schema.insights.sessionId, sessionId), eq(schema.insights.status, 'accepted'))).all()
+  const accepted = db.select().from(schema.snippets)
+    .where(and(eq(schema.snippets.sessionId, sessionId), eq(schema.snippets.status, 'accepted'))).all()
 
   const names = new Map(participantRows.map((p) => [p.id, p.name]))
   const speakerName = new Map(speakerRows.map((s) => [
@@ -67,10 +67,10 @@ export async function exportSession(config: Config, db: Db, sessionId: string): 
   const insightLinks: string[] = []
   let clips = 0
 
-  for (const insight of accepted) {
-    const range: Range = { start: insight.startWord, end: insight.endWord }
-    const bounds = insight.anchored ? clipBounds(transcript.words, range) : null
-    const baseName = noteBaseName(insight.title, usedNames)
+  for (const snippet of accepted) {
+    const range: Range = { start: snippet.startWord, end: snippet.endWord }
+    const bounds = snippet.anchored ? clipBounds(transcript.words, range) : null
+    const baseName = noteBaseName(snippet.title, usedNames)
     usedNames.add(baseName.toLowerCase())
 
     let clipFile: string | null = null
@@ -85,23 +85,23 @@ export async function exportSession(config: Config, db: Db, sessionId: string): 
         path.join(folder, clipFile),
       ])
       clips += 1
-    } else if (insight.anchored) {
-      warnings.push(`no aligned timestamps for "${insight.title}" — note exported without clip`)
+    } else if (snippet.anchored) {
+      warnings.push(`no aligned timestamps for "${snippet.title}" — note exported without clip`)
     } else {
-      warnings.push(`"${insight.title}" is unanchored — note exported without clip`)
+      warnings.push(`"${snippet.title}" is unanchored — note exported without clip`)
     }
 
     const supports = db.select().from(schema.supportingQuotes)
-      .where(eq(schema.supportingQuotes.insightId, insight.id)).all()
+      .where(eq(schema.supportingQuotes.snippetId, snippet.id)).all()
 
     const rendered = renderInsightNote({
       sessionId: session.id,
       sessionNote: folderName + '/session',
       date,
-      origin: insight.origin,
-      title: insight.title,
-      main: noteQuote(transcript.words, range, insight.quote, insight.anchored, speakerName),
-      insight: insight.insight,
+      origin: snippet.origin,
+      title: snippet.title,
+      main: noteQuote(transcript.words, range, snippet.quote, snippet.anchored, speakerName),
+      insight: snippet.note,
       clipFile,
       supporting: supports.map((s) => ({
         ...noteQuote(transcript.words, { start: s.startWord, end: s.endWord }, s.quote, s.anchored, speakerName),
@@ -142,17 +142,17 @@ export async function exportSession(config: Config, db: Db, sessionId: string): 
   return { folder, exported: accepted.length, clips, warnings }
 }
 
-/** One snippet to project into the ocean folder — the idea-layer text (title,
- * description) plus a pointer to the insight that sources its evidence. */
+/** One insight to project into the ocean folder — the idea-layer text (title,
+ * description) plus a pointer to the snippet that sources its evidence. */
 export interface OceanExportItem {
-  snippetId: number
-  sourceInsightId: number
+  insightId: number
+  sourceSnippetId: number
   title: string
   description: string
 }
 
 /** Per-session bits an ocean note needs, loaded once and shared across every
- * snippet that traces back to the same conversation. */
+ * insight that traces back to the same conversation. */
 interface SessionCtx {
   session: typeof schema.sessions.$inferSelect
   words: Word[]
@@ -162,14 +162,14 @@ interface SessionCtx {
 }
 
 /** Project the CURRENTLY-FILTERED ocean into a downloadable zip: a flat
- * `Ocean/` folder, one note per snippet, newest-spoken first, clips under
- * `Ocean/clips/`. The note's title and body are the snippet's own (idea layer
- * — free to have diverged from the insight); the quote and audio clip are
- * resolved one hop down through the source insight (evidence layer). Nothing
+ * `Ocean/` folder, one note per insight, newest-spoken first, clips under
+ * `Ocean/clips/`. The note's title and body are the insight's own (idea layer
+ * — free to have diverged from the snippet); the quote and audio clip are
+ * resolved one hop down through the source snippet (evidence layer). Nothing
  * is written to the user's disk — the browser saves the archive — so this
- * needs no configured vault. A snippet whose source insight is gone is skipped
- * with a warning. Clips are cut to a per-run temp dir (ffmpeg needs a file to
- * write), read into the zip, and the temp dir is removed before returning. */
+ * needs no configured vault. An insight whose source snippet is gone is
+ * skipped with a warning. Clips are cut to a per-run temp dir (ffmpeg needs a
+ * file to write), read into the zip, and the temp dir removed before return. */
 export async function exportOcean(
   config: Config, db: Db, items: OceanExportItem[],
 ): Promise<OceanExport> {
@@ -211,20 +211,20 @@ export async function exportOcean(
   }
 
   for (const item of items) {
-    const insight = db.select().from(schema.insights)
-      .where(eq(schema.insights.id, item.sourceInsightId)).get()
-    if (!insight) {
-      warnings.push(`"${item.title}" — source insight removed, skipped`)
+    const snippet = db.select().from(schema.snippets)
+      .where(eq(schema.snippets.id, item.sourceSnippetId)).get()
+    if (!snippet) {
+      warnings.push(`"${item.title}" — source snippet removed, skipped`)
       continue
     }
-    const ctx = ctxFor(insight.sessionId)
+    const ctx = ctxFor(snippet.sessionId)
     if (!ctx) {
       warnings.push(`"${item.title}" — source conversation removed, skipped`)
       continue
     }
 
-    const range: Range = { start: insight.startWord, end: insight.endWord }
-    const bounds = insight.anchored ? clipBounds(ctx.words, range) : null
+    const range: Range = { start: snippet.startWord, end: snippet.endWord }
+    const bounds = snippet.anchored ? clipBounds(ctx.words, range) : null
     const baseName = noteBaseName(item.title, usedNames)
     usedNames.add(baseName.toLowerCase())
 
@@ -242,22 +242,22 @@ export async function exportOcean(
       ])
       zip.file(`Ocean/${clipFile}`, fs.readFileSync(tmpClip))
       clips += 1
-    } else if (insight.anchored) {
+    } else if (snippet.anchored) {
       warnings.push(`no aligned timestamps for "${item.title}" — note exported without clip`)
     } else {
       warnings.push(`"${item.title}" is unanchored — note exported without clip`)
     }
 
     const supports = db.select().from(schema.supportingQuotes)
-      .where(eq(schema.supportingQuotes.insightId, insight.id)).all()
+      .where(eq(schema.supportingQuotes.snippetId, snippet.id)).all()
 
     const rendered = renderInsightNote({
       sessionId: ctx.session.id,
       date: ctx.date,
-      origin: insight.origin,
-      title: item.title,             // the snippet's title (idea layer)
-      main: noteQuote(ctx.words, range, insight.quote, insight.anchored, ctx.speakerName),
-      insight: item.description,     // the snippet's description (idea layer)
+      origin: snippet.origin,
+      title: item.title,             // the insight's title (idea layer)
+      main: noteQuote(ctx.words, range, snippet.quote, snippet.anchored, ctx.speakerName),
+      insight: item.description,     // the insight's description (idea layer)
       clipFile,
       supporting: supports.map((s) => ({
         ...noteQuote(ctx.words, { start: s.startWord, end: s.endWord }, s.quote, s.anchored, ctx.speakerName),

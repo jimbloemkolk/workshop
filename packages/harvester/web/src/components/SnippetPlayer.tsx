@@ -20,7 +20,7 @@ export function SnippetPlayer({ player, playerKey, start, end, fallbackDuration,
   fallbackDuration?: number | null
   /** Full-width "whole recording" variant (bigger button, more prominent
    * scrubber, a loudness waveform) for a session-level bar, as opposed to
-   * the compact per-snippet default used inline in insight cards / speaker
+   * the compact per-clip default used inline in snippet cards / speaker
    * samples — those stay plain, too short for a waveform to add anything
    * but visual noise. */
   full?: boolean

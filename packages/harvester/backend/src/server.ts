@@ -118,22 +118,22 @@ export async function startServer(
     return { started: true }
   })
 
-  app.post('/api/sessions/:id/insights', async (req) => {
+  app.post('/api/sessions/:id/snippets', async (req) => {
     const { id } = req.params as { id: string }
     const body = req.body as { startWord: number; endWord: number }
-    await service.manualInsight(id, body.startWord, body.endWord)
+    await service.manualSnippet(id, body.startWord, body.endWord)
     return service.sessionDetail(id)
   })
 
-  app.patch('/api/insights/:insightId', async (req) => {
-    const { insightId } = req.params as { insightId: string }
-    service.updateInsight(Number(insightId), req.body as Parameters<HarvesterService['updateInsight']>[1])
+  app.patch('/api/snippets/:snippetId', async (req) => {
+    const { snippetId } = req.params as { snippetId: string }
+    service.updateSnippet(Number(snippetId), req.body as Parameters<HarvesterService['updateSnippet']>[1])
     return { ok: true }
   })
 
-  app.get('/api/snippets', async (req) => {
+  app.get('/api/insights', async (req) => {
     const { q } = req.query as { q?: string }
-    return service.listSnippets(q)
+    return service.listInsights(q)
   })
 
   // Export the filtered ocean as a downloadable zip — the counterpart to the

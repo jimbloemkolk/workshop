@@ -1,23 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, type Insight, type SessionDetail, type Transcript } from '../api'
+import { api, type Snippet, type SessionDetail, type Transcript } from '../api'
 import { useRangePlayer, type RangePlayer } from '../audio'
 import { SnippetPlayer } from '../components/SnippetPlayer'
 
-/** Insight cards render in conversation order, not creation/id order —
+/** Snippet cards render in conversation order, not creation/id order —
  * otherwise a just-created selection-snippet (see createFromSelection below)
  * would land at the bottom of the pane even when it quotes the very first
  * sentence. Pure and side-effect-free: returns a new array (Array.prototype.
- * sort mutates in place, and callers pass `detail.insights` straight from
+ * sort mutates in place, and callers pass `detail.snippets` straight from
  * props — mutating that would be a prop-mutation bug), never touches its
  * input. Exported directly for unit testing. */
-export function sortByAppearance(insights: Insight[]): Insight[] {
-  return [...insights].sort((a, b) =>
+export function sortByAppearance(snippets: Snippet[]): Snippet[] {
+  return [...snippets].sort((a, b) =>
     a.startWord - b.startWord || a.endWord - b.endWord || a.id - b.id)
 }
 
 /** Review: transcript on the left, proposals on the right. Click a word to
- * move the selected insight's start, shift-click to move its end; in
- * new-insight mode the same two clicks create a manual insight. */
+ * move the selected snippet's start, shift-click to move its end; in
+ * new-snippet mode the same two clicks create a manual snippet. */
 export function ReviewView({ detail, refresh, onError }: {
   detail: SessionDetail
   refresh: () => void
@@ -35,8 +35,8 @@ export function ReviewView({ detail, refresh, onError }: {
     api.transcript(id).then(setTranscript).catch((e) => onError(String(e)))
   }, [id, onError])
 
-  const insights = detail.insights
-  const current = insights.find((i) => i.id === selected) ?? null
+  const snippets = detail.snippets
+  const current = snippets.find((i) => i.id === selected) ?? null
 
   // review-attention flags are derived, never stored (IMPLEMENTATION):
   // a proposal overlapping a connection gap, or a probably-forgotten toggle
@@ -45,7 +45,7 @@ export function ReviewView({ detail, refresh, onError }: {
     if (!transcript) return map
     const markerById = new Map(detail.markers.map((m) => [m.id, m]))
     const spanById = new Map(detail.harvestSpans.map((s) => [s.id, s]))
-    for (const i of detail.insights) {
+    for (const i of detail.snippets) {
       const flags: string[] = []
       const inRange = transcript.words.slice(i.startWord, i.endWord).filter((w) => w.start != null)
       const startS = inRange[0]?.start
@@ -98,9 +98,9 @@ export function ReviewView({ detail, refresh, onError }: {
     return null
   }
 
-  const patch = async (insightId: number, p: Parameters<typeof api.updateInsight>[1]) => {
+  const patch = async (snippetId: number, p: Parameters<typeof api.updateSnippet>[1]) => {
     try {
-      await api.updateInsight(insightId, p)
+      await api.updateSnippet(snippetId, p)
       refresh()
     } catch (e) { onError(String(e)) }
   }
@@ -115,14 +115,14 @@ export function ReviewView({ detail, refresh, onError }: {
         setNewMode({ start: null })
         setBusy(true)
         try {
-          await api.manualInsight(id, a, b)
+          await api.manualSnippet(id, a, b)
           refresh()
         } catch (e) { onError(String(e)) } finally { setBusy(false) }
       }
       return
     }
     if (!current) {
-      // No insight selected and not building a new one: click-to-jump is
+      // No snippet selected and not building a new one: click-to-jump is
       // only the primary interaction WHILE something is actually playing —
       // paused/idle, a plain click does nothing at all, so the text stays
       // freely selectable for the selection→snippet chip instead (dragging
@@ -140,19 +140,19 @@ export function ReviewView({ detail, refresh, onError }: {
     }
   }
 
-  // Second path to the exact same result as the two-click "+ new insight"
-  // flow above — reuses api.manualInsight, not a parallel implementation.
-  // manualInsight's response already carries the freshly-created insight, so
+  // Second path to the exact same result as the two-click "+ new snippet"
+  // flow above — reuses api.manualSnippet, not a parallel implementation.
+  // manualSnippet's response already carries the freshly-created snippet, so
   // there's no need to wait for a second round-trip just to find its id:
-  // diff against the insight ids we already knew about to select the new
+  // diff against the snippet ids we already knew about to select the new
   // card immediately (the two-click flow never bothered to auto-select,
   // this one does, per spec).
   const createFromSelection = async (startWord: number, endWord: number) => {
     setBusy(true)
     try {
-      const existingIds = new Set(insights.map((i) => i.id))
-      const newDetail = await api.manualInsight(id, startWord, endWord)
-      const created = newDetail.insights.find((i) => !existingIds.has(i.id))
+      const existingIds = new Set(snippets.map((i) => i.id))
+      const newDetail = await api.manualSnippet(id, startWord, endWord)
+      const created = newDetail.snippets.find((i) => !existingIds.has(i.id))
       setNewModeOn(false)
       if (created) setSelected(created.id)
       refresh()
@@ -160,19 +160,19 @@ export function ReviewView({ detail, refresh, onError }: {
   }
 
   const reharvest = async () => {
-    if (!confirm('Re-harvest replaces all still-proposed insights. Accepted/rejected survive.')) return
+    if (!confirm('Re-harvest replaces all still-proposed snippets. Accepted/rejected survive.')) return
     try { await api.harvest(id) } catch (e) { onError(String(e)) }
   }
 
   // Card order in the pane follows the conversation, not creation/id order —
   // otherwise a just-created selection-snippet (see createFromSelection)
   // lands at the bottom even when it quotes the very first sentence.
-  const sortedInsights = useMemo(() => sortByAppearance(insights), [insights])
+  const sortedSnippets = useMemo(() => sortByAppearance(snippets), [snippets])
 
   // Cursor-only signal for TranscriptPane, so the click-vs-select mode isn't
   // invisible: true in exactly the state where onWordClick's own "no
   // selection, not playing" branch does nothing at all (see there) — new-
-  // insight mode and editing a selected insight's range keep the normal
+  // snippet mode and editing a selected snippet's range keep the normal
   // pointer cursor in both playback states, since clicking still does
   // something in those modes regardless of whether audio is playing.
   const wordsAreSelectable = !newModeOn && !current && player.playingKey == null
@@ -204,7 +204,7 @@ export function ReviewView({ detail, refresh, onError }: {
           />
         ) : <p className="muted">loading transcript…</p>}
       </section>
-      <aside className="insights">
+      <aside className="snippets">
         <div className="row toolbar">
           <button
             className={newModeOn ? 'primary' : ''}
@@ -212,15 +212,15 @@ export function ReviewView({ detail, refresh, onError }: {
           >
             {newModeOn
               ? (newMode.start == null ? 'click first word…' : 'click last word…')
-              : '+ new insight'}
+              : '+ new snippet'}
           </button>
           <button onClick={reharvest}>↻ re-harvest</button>
         </div>
-        {insights.length === 0 && <p className="muted">No proposals yet.</p>}
-        {sortedInsights.map((i) => (
-          <InsightCard
+        {snippets.length === 0 && <p className="muted">No proposals yet.</p>}
+        {sortedSnippets.map((i) => (
+          <SnippetCard
             key={i.id}
-            insight={i}
+            snippet={i}
             attention={attention.get(i.id) ?? []}
             selected={i.id === selected}
             onSelect={() => { setSelected(i.id); setNewModeOn(false) }}
@@ -295,16 +295,16 @@ function TranscriptPane({
 }: {
   transcript: Transcript
   speakerName: Map<string, string>
-  highlight: Insight | null
+  highlight: Snippet | null
   pendingStart: number | null
   onWordClick: (index: number, shift: boolean) => void
   /** Absolute recording time of whatever's loaded into the shared player
-   * (session bar or an insight snippet — both live in this view), or null
+   * (session bar or a snippet's clip — both live in this view), or null
    * when nothing has ever played. Drives the "now speaking" highlight. */
   playheadS: number | null
   isPlaying: boolean
   /** Cursor-only: true exactly when a plain word click does nothing (no
-   * insight selected, not building one, nothing playing) — swaps the
+   * snippet selected, not building one, nothing playing) — swaps the
    * pointer cursor for a text cursor so "clicking does nothing here, but
    * you can select" isn't invisible. Doesn't gate any actual behavior;
    * onWordClick's own logic (in ReviewView) already decides that. */
@@ -459,7 +459,7 @@ function TranscriptPane({
                     // A drag-selection's terminating mouseup can also fire a
                     // click on that same word — with an active (non-collapsed)
                     // selection, word-click's own effects (seeking playback,
-                    // moving an insight's boundary) must be suppressed, or
+                    // moving an snippet's boundary) must be suppressed, or
                     // just trying to select text would also jump playback.
                     if (window.getSelection()?.isCollapsed === false) return
                     onWordClick(w.index, e.shiftKey)
@@ -491,17 +491,17 @@ function TranscriptPane({
   )
 }
 
-function InsightCard({ insight, attention, selected, onSelect, player, range, fallbackDuration, onPatch }: {
-  insight: Insight
+function SnippetCard({ snippet, attention, selected, onSelect, player, range, fallbackDuration, onPatch }: {
+  snippet: Snippet
   attention: string[]
   selected: boolean
   onSelect: () => void
   player: RangePlayer
   range: [number, number | null]
   fallbackDuration: number | null
-  onPatch: (p: Parameters<typeof api.updateInsight>[1]) => void
+  onPatch: (p: Parameters<typeof api.updateSnippet>[1]) => void
 }) {
-  const i = insight
+  const i = snippet
   return (
     <div className={`card ${i.status}${selected ? ' selected' : ''}`} onClick={onSelect}>
       <div className="row">
@@ -512,7 +512,7 @@ function InsightCard({ insight, attention, selected, onSelect, player, range, fa
       </div>
       <strong>{i.title}</strong>
       <blockquote>{i.quote}</blockquote>
-      {i.insight && <p className="insight-text">{i.insight}</p>}
+      {i.note && <p className="note-text">{i.note}</p>}
       {i.supporting.length > 0 && (
         <details>
           <summary>{i.supporting.length} supporting quote(s)</summary>
