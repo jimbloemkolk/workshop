@@ -19,29 +19,8 @@
     {
       "idx": 2,
       "version": "6",
-      "when": 1784707768946,
-      "tag": "0002_stale_tomas",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1784718696229,
-      "tag": "0003_futuristic_makkari",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1784757667120,
-      "tag": "0004_windy_lyja",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1784757707120,
-      "tag": "0005_swap_insight_snippet",
+      "when": 1784379558117,
+      "tag": "0002_the_ocean",
       "breakpoints": true
     }
   ]

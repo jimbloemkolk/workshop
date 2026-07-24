@@ -431,3 +431,7 @@ button.icon-btn {
   border-radius: 3px;
 }
 .insight-source:hover { text-decoration: underline; background: var(--accent-soft); }
+/* an insight's snippets, expandable in the ocean card */
+.insight-snippets { margin-top: 0.6rem; }
+.insight-snippets > summary { cursor: pointer; color: var(--muted); font-size: 0.8rem; }
+.insight-snippets .insight-quote { margin-top: 0.4rem; }

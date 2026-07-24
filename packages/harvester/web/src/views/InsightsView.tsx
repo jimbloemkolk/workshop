@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, type Insight } from '../api'
+import { api, type OceanInsight } from '../api'
 import { onServerEvent } from '../socket'
 
 /** The ocean: every accepted insight, newest-spoken first, with a search box
@@ -9,7 +9,7 @@ import { onServerEvent } from '../socket'
  * insight originated from — the card itself is not clickable. */
 export function InsightsView({ onOpenSession }: { onOpenSession: (id: string) => void }) {
   const [query, setQuery] = useState('')
-  const [insights, setInsights] = useState<Insight[]>([])
+  const [insights, setInsights] = useState<OceanInsight[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
@@ -97,16 +97,24 @@ export function InsightsView({ onOpenSession }: { onOpenSession: (id: string) =>
 }
 
 function InsightCard({ insight, onOpenSession }: {
-  insight: Insight
+  insight: OceanInsight
   onOpenSession: (id: string) => void
 }) {
-  const { sessionId, sessionTitle, quote } = insight
+  const { sessionId, sessionTitle, quote, snippets } = insight
 
   return (
     <li className="insight-card">
       <h3 className="insight-title">{insight.title}</h3>
       <p className="insight-desc">{insight.description}</p>
       {quote && <blockquote className="insight-quote">“{quote}”</blockquote>}
+      {snippets.length > 1 && (
+        <details className="insight-snippets">
+          <summary>{snippets.length} snippets</summary>
+          {snippets.map((s) => (
+            <blockquote key={s.id} className="insight-quote">“{s.quote}”</blockquote>
+          ))}
+        </details>
+      )}
       <div className="insight-meta">
         <span className="spoken">{new Date(insight.spokenAt).toLocaleString()}</span>
         {sessionId ? (

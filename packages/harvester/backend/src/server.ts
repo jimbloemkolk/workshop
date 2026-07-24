@@ -118,16 +118,16 @@ export async function startServer(
     return { started: true }
   })
 
-  app.post('/api/sessions/:id/snippets', async (req) => {
+  app.post('/api/sessions/:id/insights', async (req) => {
     const { id } = req.params as { id: string }
     const body = req.body as { startWord: number; endWord: number }
-    await service.manualSnippet(id, body.startWord, body.endWord)
+    await service.manualInsight(id, body.startWord, body.endWord)
     return service.sessionDetail(id)
   })
 
-  app.patch('/api/snippets/:snippetId', async (req) => {
-    const { snippetId } = req.params as { snippetId: string }
-    service.updateSnippet(Number(snippetId), req.body as Parameters<HarvesterService['updateSnippet']>[1])
+  app.patch('/api/insights/:insightId', async (req) => {
+    const { insightId } = req.params as { insightId: string }
+    service.updateInsight(Number(insightId), req.body as Parameters<HarvesterService['updateInsight']>[1])
     return { ok: true }
   })
 

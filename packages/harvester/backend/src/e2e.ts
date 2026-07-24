@@ -94,18 +94,20 @@ export async function runE2e(baseConfig: Config, opts: { noLlm: boolean }): Prom
 
     // 4. harvest
     await service.harvestSession(sessionId, { fixture: opts.noLlm })
+    const insights = db.select().from(schema.insights)
+      .where(eq(schema.insights.sessionId, sessionId)).all()
     const snippets = db.select().from(schema.snippets)
       .where(eq(schema.snippets.sessionId, sessionId)).all()
-    check(`harvest produced snippets (${snippets.length})`, snippets.length >= markerSpans.length)
+    check(`harvest produced insights (${insights.length})`, insights.length >= markerSpans.length)
     check('all snippets anchored (or explicitly flagged)',
       snippets.every((s) => s.anchored || s.status === 'proposed'))
-    const markerSnippets = snippets.filter((s) => s.origin === 'marker')
-    check(`marker snippets present (${markerSnippets.length}/${markerSpans.length})`,
-      markerSnippets.length >= 1)
+    const markerInsights = insights.filter((i) => i.origin === 'marker')
+    check(`marker insights present (${markerInsights.length}/${markerSpans.length})`,
+      markerInsights.length >= 1)
 
-    // 5. accept everything anchored, export
-    for (const s of snippets.filter((x) => x.anchored)) {
-      service.updateSnippet(s.id, { status: 'accepted' })
+    // 5. accept every insight (its snippets accept with it), export
+    for (const i of insights) {
+      service.updateInsight(i.id, { status: 'accepted' })
     }
     const report = await service.export(sessionId)
     check(`export wrote ${report.exported} notes + ${report.clips} clips`,

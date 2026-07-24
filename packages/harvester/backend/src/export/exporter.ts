@@ -27,8 +27,23 @@ export interface OceanExport {
   warnings: string[]
 }
 
-/** Project a session's accepted snippets into the Obsidian vault: one folder
- * per session, one note per snippet, clips alongside. Re-runnable — the vault
+/** An insight's evidence: its main snippet and its supporting snippets (each
+ * with the link's `why`). Shared by both export paths. */
+function insightEvidence(db: Db, insight: typeof schema.insights.$inferSelect) {
+  const main = db.select().from(schema.snippets)
+    .where(eq(schema.snippets.id, insight.mainSnippetId)).get() ?? null
+  const supporting = db.select().from(schema.insightSnippets)
+    .where(eq(schema.insightSnippets.insightId, insight.id)).all()
+    .map((l) => {
+      const s = db.select().from(schema.snippets).where(eq(schema.snippets.id, l.snippetId)).get()
+      return s ? { ...s, why: l.why } : null
+    })
+    .filter((s): s is NonNullable<typeof s> => s != null)
+  return { main, supporting }
+}
+
+/** Project a session's accepted insights into the Obsidian vault: one folder
+ * per session, one note per insight, clips alongside. Re-runnable — the vault
  * is a projection, and human regions below the marker survive. */
 export async function exportSession(config: Config, db: Db, sessionId: string): Promise<ExportReport> {
   if (!config.vaultDir) {
@@ -44,8 +59,8 @@ export async function exportSession(config: Config, db: Db, sessionId: string): 
     .where(eq(schema.speakers.sessionId, sessionId)).all()
   const markerRows = db.select().from(schema.markers)
     .where(and(eq(schema.markers.sessionId, sessionId), eq(schema.markers.flag, 'ok'))).all()
-  const accepted = db.select().from(schema.snippets)
-    .where(and(eq(schema.snippets.sessionId, sessionId), eq(schema.snippets.status, 'accepted'))).all()
+  const accepted = db.select().from(schema.insights)
+    .where(and(eq(schema.insights.sessionId, sessionId), eq(schema.insights.status, 'accepted'))).all()
 
   const names = new Map(participantRows.map((p) => [p.id, p.name]))
   const speakerName = new Map(speakerRows.map((s) => [
@@ -67,10 +82,15 @@ export async function exportSession(config: Config, db: Db, sessionId: string): 
   const insightLinks: string[] = []
   let clips = 0
 
-  for (const snippet of accepted) {
-    const range: Range = { start: snippet.startWord, end: snippet.endWord }
-    const bounds = snippet.anchored ? clipBounds(transcript.words, range) : null
-    const baseName = noteBaseName(snippet.title, usedNames)
+  for (const insight of accepted) {
+    const { main, supporting } = insightEvidence(db, insight)
+    if (!main) {
+      warnings.push(`"${insight.title}" has no main snippet — skipped`)
+      continue
+    }
+    const range: Range = { start: main.startWord, end: main.endWord }
+    const bounds = main.anchored ? clipBounds(transcript.words, range) : null
+    const baseName = noteBaseName(insight.title, usedNames)
     usedNames.add(baseName.toLowerCase())
 
     let clipFile: string | null = null
@@ -85,25 +105,22 @@ export async function exportSession(config: Config, db: Db, sessionId: string): 
         path.join(folder, clipFile),
       ])
       clips += 1
-    } else if (snippet.anchored) {
-      warnings.push(`no aligned timestamps for "${snippet.title}" — note exported without clip`)
+    } else if (main.anchored) {
+      warnings.push(`no aligned timestamps for "${insight.title}" — note exported without clip`)
     } else {
-      warnings.push(`"${snippet.title}" is unanchored — note exported without clip`)
+      warnings.push(`"${insight.title}" is unanchored — note exported without clip`)
     }
-
-    const supports = db.select().from(schema.supportingQuotes)
-      .where(eq(schema.supportingQuotes.snippetId, snippet.id)).all()
 
     const rendered = renderInsightNote({
       sessionId: session.id,
       sessionNote: folderName + '/session',
       date,
-      origin: snippet.origin,
-      title: snippet.title,
-      main: noteQuote(transcript.words, range, snippet.quote, snippet.anchored, speakerName),
-      insight: snippet.note,
+      origin: insight.origin,
+      title: insight.title,
+      main: noteQuote(transcript.words, range, main.quote, main.anchored, speakerName),
+      insight: insight.description,
       clipFile,
-      supporting: supports.map((s) => ({
+      supporting: supporting.map((s) => ({
         ...noteQuote(transcript.words, { start: s.startWord, end: s.endWord }, s.quote, s.anchored, speakerName),
         why: s.why ?? '',
       })),
@@ -143,10 +160,9 @@ export async function exportSession(config: Config, db: Db, sessionId: string): 
 }
 
 /** One insight to project into the ocean folder — the idea-layer text (title,
- * description) plus a pointer to the snippet that sources its evidence. */
+ * description); its evidence (main + supporting snippets) is resolved by id. */
 export interface OceanExportItem {
   insightId: number
-  sourceSnippetId: number
   title: string
   description: string
 }
@@ -211,20 +227,25 @@ export async function exportOcean(
   }
 
   for (const item of items) {
-    const snippet = db.select().from(schema.snippets)
-      .where(eq(schema.snippets.id, item.sourceSnippetId)).get()
-    if (!snippet) {
-      warnings.push(`"${item.title}" — source snippet removed, skipped`)
+    const insight = db.select().from(schema.insights)
+      .where(eq(schema.insights.id, item.insightId)).get()
+    if (!insight) {
+      warnings.push(`"${item.title}" — insight removed, skipped`)
       continue
     }
-    const ctx = ctxFor(snippet.sessionId)
+    const { main, supporting } = insightEvidence(db, insight)
+    if (!main) {
+      warnings.push(`"${item.title}" — no main snippet, skipped`)
+      continue
+    }
+    const ctx = ctxFor(main.sessionId)
     if (!ctx) {
       warnings.push(`"${item.title}" — source conversation removed, skipped`)
       continue
     }
 
-    const range: Range = { start: snippet.startWord, end: snippet.endWord }
-    const bounds = snippet.anchored ? clipBounds(ctx.words, range) : null
+    const range: Range = { start: main.startWord, end: main.endWord }
+    const bounds = main.anchored ? clipBounds(ctx.words, range) : null
     const baseName = noteBaseName(item.title, usedNames)
     usedNames.add(baseName.toLowerCase())
 
@@ -242,24 +263,21 @@ export async function exportOcean(
       ])
       zip.file(`Ocean/${clipFile}`, fs.readFileSync(tmpClip))
       clips += 1
-    } else if (snippet.anchored) {
+    } else if (main.anchored) {
       warnings.push(`no aligned timestamps for "${item.title}" — note exported without clip`)
     } else {
       warnings.push(`"${item.title}" is unanchored — note exported without clip`)
     }
 
-    const supports = db.select().from(schema.supportingQuotes)
-      .where(eq(schema.supportingQuotes.snippetId, snippet.id)).all()
-
     const rendered = renderInsightNote({
       sessionId: ctx.session.id,
       date: ctx.date,
-      origin: snippet.origin,
+      origin: insight.origin,
       title: item.title,             // the insight's title (idea layer)
-      main: noteQuote(ctx.words, range, snippet.quote, snippet.anchored, ctx.speakerName),
+      main: noteQuote(ctx.words, range, main.quote, main.anchored, ctx.speakerName),
       insight: item.description,     // the insight's description (idea layer)
       clipFile,
-      supporting: supports.map((s) => ({
+      supporting: supporting.map((s) => ({
         ...noteQuote(ctx.words, { start: s.startWord, end: s.endWord }, s.quote, s.anchored, ctx.speakerName),
         why: s.why ?? '',
       })),

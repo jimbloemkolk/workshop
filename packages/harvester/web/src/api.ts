@@ -54,45 +54,53 @@ export interface HarvestSpan {
   memberIds: number[]
 }
 
-export interface SupportingQuote {
-  id: number
-  startWord: number
-  endWord: number
-  quote: string
-  why: string | null
-  anchored: boolean
-}
-
-/** A snippet: the verbatim atom you review — a literal quote plus its
- * anchoring. `note` is the harvester's interpretive gloss (seeds an insight's
- * description at accept). */
+/** A snippet: the evidence atom — a verbatim slice of the transcript (word
+ * range + quote), anchored in time. Carries no meaning of its own. */
 export interface Snippet {
   id: number
-  origin: 'marker' | 'sweep' | 'manual'
-  harvestSpanId: number | null
-  title: string
+  sessionId: string
   startWord: number
   endWord: number
   quote: string
-  note: string
   anchored: boolean
+  spokenAt: number | null
   status: 'proposed' | 'accepted' | 'rejected'
-  supporting: SupportingQuote[]
 }
 
-/** An ocean entry — an insight: the refined idea. `title`/`description` are
- * its own (diverge-able) copy; `quote`/`sessionId`/`sessionTitle` are resolved
- * live from the source snippet and are null once that source has been removed. */
+export interface SupportingSnippet extends Snippet {
+  /** why this supporting snippet matters (from the insight link) */
+  why: string | null
+}
+
+/** An insight as reviewed: the proposed unit over its evidence — a main
+ * snippet plus supporting snippets. Accepting flips `status` in place (which
+ * cascades to the snippets); no copy. */
 export interface Insight {
+  id: number
+  sessionId: string
+  origin: 'marker' | 'sweep' | 'manual'
+  harvestSpanId: number | null
+  mainSnippetId: number
+  title: string
+  description: string
+  status: 'proposed' | 'accepted' | 'rejected'
+  main: Snippet | null
+  supporting: SupportingSnippet[]
+}
+
+/** An ocean entry — an accepted insight, with the snippets it's built from (so
+ * the UI can expand it). `quote`/`sessionId`/`sessionTitle` are resolved from
+ * the main snippet and are null once that source has been removed. */
+export interface OceanInsight {
   id: number
   title: string
   description: string
   spokenAt: number
   createdAt: number
-  sourceSnippetId: number
   sessionId: string | null
   sessionTitle: string | null
   quote: string | null
+  snippets: { id: number; quote: string; spokenAt: number | null }[]
 }
 
 /** Metadata for an ocean export download (the zip itself is saved by the
@@ -111,7 +119,7 @@ export interface SessionDetail {
   markers: Marker[]
   gaps: Gap[]
   harvestSpans: HarvestSpan[]
-  snippets: Snippet[]
+  insights: Insight[]
   hasTranscript: boolean
 }
 
@@ -163,15 +171,15 @@ export const api = {
     request<SessionDetail>('POST', `/api/sessions/${id}/speakers`, { label, participantId }),
   harvest: (id: string, fixture = false) =>
     request<{ started: boolean }>('POST', `/api/sessions/${id}/harvest`, { fixture }),
-  manualSnippet: (id: string, startWord: number, endWord: number) =>
-    request<SessionDetail>('POST', `/api/sessions/${id}/snippets`, { startWord, endWord }),
-  updateSnippet: (snippetId: number, patch: Partial<Pick<Snippet, 'status' | 'startWord' | 'endWord' | 'title' | 'note'>>) =>
-    request<{ ok: boolean }>('PATCH', `/api/snippets/${snippetId}`, patch),
+  manualInsight: (id: string, startWord: number, endWord: number) =>
+    request<SessionDetail>('POST', `/api/sessions/${id}/insights`, { startWord, endWord }),
+  updateInsight: (insightId: number, patch: Partial<Pick<Insight, 'status' | 'title' | 'description'>> & { startWord?: number; endWord?: number }) =>
+    request<{ ok: boolean }>('PATCH', `/api/insights/${insightId}`, patch),
   export: (id: string) =>
     request<{ folder: string; exported: number; clips: number; warnings: string[] }>(
       'POST', `/api/sessions/${id}/export`),
   insights: (q?: string) =>
-    request<Insight[]>('GET', `/api/insights${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+    request<OceanInsight[]>('GET', `/api/insights${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   // The ocean export is a file download, not JSON: POST, save the returned
   // zip via a transient object URL, and read the counts/warnings off the
   // out-of-band header for the caller's toast.

@@ -71,63 +71,56 @@ export const harvests = sqliteTable('harvests', {
   finishedAt: integer('finished_at'),
 })
 
-/** A "snippet": a verbatim atom lifted from the transcript — a literal,
- * source-traceable quote plus where and when it was said ("arceren en
- * overpennen"). The building block you harvest and review; the audio-clip
- * `SnippetPlayer` plays exactly this. Not every snippet becomes an insight.
- * `note` is the harvester's interpretive gloss on the quote — the seed an
- * insight grows from (copied into the insight's description at birth). */
+/** A "snippet": the evidence atom — a verbatim slice of the transcript (word
+ * range + `quote`), anchored in time. The audio-clip `SnippetPlayer` plays
+ * exactly this. `quote` is verbatim today and becomes the refinable text if a
+ * refiner ever lands (the Quote-vs-Snippet split, deferred until then). A
+ * snippet carries no title/meaning of its own — it belongs to an insight (as
+ * its main or a supporting snippet) and is accepted when that insight is. */
 export const snippets = sqliteTable('snippets', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   sessionId: text('session_id').notNull(),
-  harvestId: integer('harvest_id'),
-  origin: text('origin').notNull(), // marker | sweep | manual
-  /** the merged span this snippet came from; links back to raw markers */
-  harvestSpanId: integer('harvest_span_id'),
-  title: text('title').notNull(),
   /** word-index range into the transcript's words array, [start, end) */
   startWord: integer('start_word').notNull(),
   endWord: integer('end_word').notNull(),
   quote: text('quote').notNull(),
-  /** the harvester's interpretive gloss on the quote (formerly `insight`) */
-  note: text('note').notNull(),
   /** false = failed verbatim verification; needs human attention */
   anchored: integer('anchored', { mode: 'boolean' }).notNull().default(true),
   /** the spoken moment, epoch ms: session.createdAt + the first word's offset
-   * into the recording. Anchored to the transcript like `quote` — precomputed
-   * at creation, recomputed when the word range is edited, null when timing
-   * can't be resolved. The ocean sorts insights by their source snippet's
-   * spokenAt (the true birthday). */
+   * into the recording. Precomputed at creation, recomputed when the word
+   * range is edited, null when timing can't be resolved. The ocean orders
+   * insights by their main snippet's spokenAt. */
   spokenAt: integer('spoken_at'),
+  status: text('status').notNull().default('proposed'), // proposed | accepted | rejected
+})
+
+/** An "insight": what the harvester proposes and you review — a title +
+ * description over a main snippet, with supporting snippets (via
+ * `insight_snippets`). Reviewed in place: accepting is just `status →
+ * accepted`, which cascades to its snippets; accepted insights populate the
+ * ocean, ordered there by the main snippet's `spokenAt`. */
+export const insights = sqliteTable('insights', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  sessionId: text('session_id').notNull(),
+  harvestId: integer('harvest_id'),
+  origin: text('origin').notNull(), // marker | sweep | manual
+  /** the merged span this insight came from; links back to raw markers */
+  harvestSpanId: integer('harvest_span_id'),
+  /** the primary evidence snippet */
+  mainSnippetId: integer('main_snippet_id').notNull(),
+  title: text('title').notNull(),
+  description: text('description').notNull(),
   status: text('status').notNull().default('proposed'), // proposed | accepted | rejected
   createdAt: integer('created_at').notNull(),
 })
 
-/** The "ocean" — an "insight": the refined aha built on a snippet. Owns just
- * a title and description (copied from the source snippet at birth, then free
- * to diverge); the quote, clip and spoken time stay on the snippet and resolve
- * one hop down via `sourceSnippetId`. Every insight has a snippet — it's born
- * when a snippet is accepted in review — but not every snippet is an insight.
- * Ordered in the ocean by the source snippet's `spokenAt`, not by this
- * `createdAt` (when it was accepted into the ocean). */
-export const insights = sqliteTable('insights', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  /** the single snippet this insight was refined from — its source. */
-  sourceSnippetId: integer('source_snippet_id').notNull(),
-  title: text('title').notNull(),
-  description: text('description').notNull(),
-  /** epoch ms of acceptance into the ocean */
-  createdAt: integer('created_at').notNull(),
-})
-
-export const supportingQuotes = sqliteTable('supporting_quotes', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+/** Supporting snippets attached to an insight — replaces the old
+ * `supporting_quotes` table now that all evidence is just snippets. `why` is
+ * the harvester's note on why this supporting snippet matters. */
+export const insightSnippets = sqliteTable('insight_snippets', {
+  insightId: integer('insight_id').notNull(),
   snippetId: integer('snippet_id').notNull(),
-  startWord: integer('start_word').notNull(),
-  endWord: integer('end_word').notNull(),
-  quote: text('quote').notNull(),
   why: text('why'),
-  anchored: integer('anchored', { mode: 'boolean' }).notNull().default(true),
 })
 
 /** A call participant's recording is an ordered list of track segments —
