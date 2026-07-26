@@ -62,6 +62,18 @@ export function createFixtureClient(transcript: Transcript): AgentClient {
         return { text: JSON.stringify({ candidates }), sessionId }
       }
 
+      if (prompt.startsWith('Last task: the session summary')) {
+        // Counted straight off the list the real prompt embeds, so the
+        // fixture summary still reflects what this run actually harvested.
+        const n = (prompt.match(/^\d+\. /gm) ?? []).length
+        return {
+          text: JSON.stringify({
+            summary: `Fixture: gesprek met ${n} geoogste inzicht${n === 1 ? '' : 'en'}.`,
+          }),
+          sessionId,
+        }
+      }
+
       const manual = /selected words \[(\d+), (\d+)\)/.exec(prompt)
       if (manual) {
         const reply = {

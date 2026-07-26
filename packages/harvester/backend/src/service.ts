@@ -237,6 +237,14 @@ export class HarvesterService {
         this.db.delete(schema.insights).where(eq(schema.insights.id, ins.id)).run()
       }
       for (const proposal of outcome.proposals) this.storeProposal(id, harvest.id, proposal)
+      // The overview line. Written only when there's something to say: a
+      // summary turn that failed shouldn't blank the one the last harvest
+      // produced. A harvest that proposed *nothing* does clear it — there
+      // are no snippets left for it to be based on.
+      if (outcome.summary || outcome.proposals.length === 0) {
+        this.db.update(schema.sessions).set({ summary: outcome.summary })
+          .where(eq(schema.sessions.id, id)).run()
+      }
       this.db.update(schema.harvests).set({
         status: 'done',
         finishedAt: Date.now(),

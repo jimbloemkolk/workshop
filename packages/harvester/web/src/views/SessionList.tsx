@@ -77,6 +77,10 @@ export function SessionList({ sessions, onOpen, onStart, onStartCall, onImport, 
               {new Date(s.createdAt).toLocaleString()} · {fmtTime(s.durationS)}
             </span>
             <button className="danger small" onClick={(e) => remove(e, s)}>✕ delete</button>
+            {/* Wraps onto its own line under the row (see .list li .summary).
+                Absent until a harvest has proposed something to write it
+                from, so the row simply stays as it was. */}
+            {s.summary && <p className="summary">{s.summary}</p>}
           </li>
         ))}
       </ul>

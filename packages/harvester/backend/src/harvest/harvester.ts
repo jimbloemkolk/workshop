@@ -3,7 +3,9 @@ import {
 } from '@workshop/harvester-core'
 import { anchorQuote, verbatim, type Range } from '../anchor.js'
 import type { AgentClient } from './agent.js'
-import { anchorRetryTurn, manualTurn, markerTurn, sweepTurn, transcriptIntro } from './prompts.js'
+import {
+  anchorRetryTurn, manualTurn, markerTurn, summaryTurn, sweepTurn, transcriptIntro,
+} from './prompts.js'
 
 /** A merged mark region (harvest_spans row): one agent turn per region, so
  * both parties marking the same moment yields one proposal, not a pair. */
@@ -48,6 +50,10 @@ export interface HarvestOutcome {
   proposals: Proposal[]
   skipped: { spanId: number; reason: string }[]
   agentSessionId: string | null
+  /** One or two sentences for the sessions overview, written from the
+   * proposals above. Null when there were none to write it from, or when
+   * that last turn failed — see runHarvest. */
+  summary: string | null
 }
 
 interface RawQuote { startWord?: number; endWord?: number; text?: string }
@@ -75,7 +81,7 @@ export async function runHarvest(
   gaps: GapLine[],
   onProgress: (p: HarvestProgress) => void,
 ): Promise<HarvestOutcome> {
-  const total = spans.length + 2 // intro + spans + sweep
+  const total = spans.length + 3 // intro + spans + sweep + summary
   onProgress({ step: 'loading transcript into the agent', done: 0, total })
   const intro = await agent.turn(transcriptIntro(
     renderIndexedTranscript(transcript, speakerNames, gaps), spans.length, gaps.length > 0))
@@ -108,7 +114,7 @@ export async function runHarvest(
     else skipped.push({ spanId: span.id, reason: built.error ?? 'unusable reply' })
   }
 
-  onProgress({ step: 'sweep for unmarked candidates', done: total - 1, total })
+  onProgress({ step: 'sweep for unmarked candidates', done: spans.length + 1, total })
   const { reply: sweep, sessionId } = await jsonTurn<RawSweepReply>(agent, sweepTurn(SWEEP_MAX), session)
   session = sessionId
   for (const candidate of (sweep.candidates ?? []).slice(0, SWEEP_MAX)) {
@@ -117,8 +123,27 @@ export async function runHarvest(
     if (built.proposal) proposals.push(built.proposal)
   }
 
+  // The overview line, written from what was just harvested — so no
+  // proposals means no summary, rather than a summary of the transcript at
+  // large. A failure here is swallowed on purpose: the insights are the
+  // harvest, and losing all of them over a cosmetic last turn would be a
+  // bad trade.
+  let summary: string | null = null
+  if (proposals.length > 0) {
+    onProgress({ step: 'writing the session summary', done: spans.length + 2, total })
+    try {
+      const written = await jsonTurn<{ summary?: string }>(agent, summaryTurn(proposals.map((p) => ({
+        title: p.title, note: p.note, quote: p.main.quote,
+      }))), session)
+      session = written.sessionId
+      summary = written.reply.summary?.trim() || null
+    } catch {
+      summary = null
+    }
+  }
+
   onProgress({ step: 'done', done: total, total })
-  return { proposals, skipped, agentSessionId: session }
+  return { proposals, skipped, agentSessionId: session, summary }
 }
 
 /** One extra turn in the (resumable) harvest session for a human-selected

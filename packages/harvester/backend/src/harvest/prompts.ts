@@ -110,6 +110,41 @@ Reply with JSON:
 }`
 }
 
+/** The one line the sessions overview shows per conversation. Deliberately
+ * fed the harvested insights rather than pointed back at the transcript in
+ * context: a summary of everything said drifts toward "we talked about a lot
+ * of things", while a summary of what was *marked* says what the
+ * conversation actually yielded — and it stays honest to the evidence,
+ * which is the same rule the quotes live under. */
+export function summaryTurn(insights: { title: string; note: string; quote: string }[]): string {
+  const list = insights
+    .map((i, n) => `${n + 1}. ${i.title}\n   quote: "${clip(i.quote, 240)}"\n   why it matters: ${clip(i.note, 240)}`)
+    .join('\n')
+  return `Last task: the session summary, shown in the sessions overview as the one
+line that tells us what this conversation was about.
+
+Base it ONLY on the insights harvested above — listed again here. Do not
+summarize the rest of the transcript, and do not introduce topics that none
+of these insights touch.
+
+<insights>
+${list}
+</insights>
+
+At most two sentences, roughly 40 words. Say what the conversation was
+about, concretely — name the actual subjects, not the fact that subjects
+were discussed ("Waarom het lab een eigen deploy nodig heeft", not "Een
+gesprek over verschillende onderwerpen"). Language of the conversation.
+No title, no preamble, no quotes.
+
+Reply with JSON:
+{ "summary": "..." }`
+}
+
+function clip(s: string, max: number): string {
+  return s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`
+}
+
 export function anchorRetryTurn(problem: string): string {
   return `Your previous answer failed verification: ${problem}
 The quote text must match the transcript words at the indices you give,

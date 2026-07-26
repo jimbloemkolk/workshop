@@ -106,7 +106,7 @@ function makeDetail(insights: Insight[]): SessionDetail {
   return {
     session: {
       id: 'test-session', title: 'Test session', status: 'reviewing',
-      origin: 'local', createdAt: 0, durationS: 400, error: null, curated: false,
+      origin: 'local', createdAt: 0, durationS: 400, summary: null, error: null, curated: false,
     },
     participants: [],
     speakers: [],

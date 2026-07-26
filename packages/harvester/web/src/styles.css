@@ -121,12 +121,23 @@ button.small { font-size: 0.6rem; padding: 0.3rem 0.6rem; }
 .dropzone { color: var(--muted); font-size: 0.65rem; font-weight: 400; }
 .list ul { list-style: none; padding: 0; margin-top: 2rem; border-top: 1px solid var(--rule); }
 .list li {
-  display: flex; gap: 1.25rem; align-items: baseline; padding: 0.9rem 0.4rem;
+  display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: baseline; padding: 0.9rem 0.4rem;
   border-bottom: 1px solid var(--rule); cursor: pointer;
   transition: background-color 0.15s ease;
 }
 .list li:hover { background: var(--surface); }
 .list li .title { flex: 1; font-size: 1.1rem; font-weight: 600; }
+/* What the conversation was about, on its own line under the row: a full
+   flex basis is what breaks it there, so the title/status/date line above
+   keeps the layout it always had. Serif and roomy — this is the one piece
+   of prose in the table of contents, and it reads like a caption, not a
+   field. Clamped so a long one can't push the next session off the page. */
+.list li .summary {
+  flex-basis: 100%; margin: 0.1rem 0 0;
+  color: var(--muted); font-size: 0.94rem; line-height: 1.5;
+  max-width: 62ch;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
 .list .muted { font-size: 0.85rem; font-style: italic; }
 .list li button { flex-shrink: 0; }
 .list .ongoing { margin-top: 2rem; }

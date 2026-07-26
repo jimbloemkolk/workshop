@@ -17,6 +17,12 @@ export const sessions = sqliteTable('sessions', {
   createdAt: integer('created_at').notNull(),
   /** duration of the concatenated recording, known after finalize */
   durationS: real('duration_s'),
+  /** One or two sentences on what this conversation was about, written by
+   * the harvester from the insights it proposed — never from the raw
+   * transcript, so the overview line says what the conversation *yielded*
+   * rather than what was merely said. Rewritten by each harvest; null until
+   * a harvest produces its first insight. */
+  summary: text('summary'),
   error: text('error'),
   exportedAt: integer('exported_at'),
 })

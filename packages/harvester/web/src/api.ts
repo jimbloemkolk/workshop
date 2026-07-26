@@ -5,6 +5,9 @@ export interface Session {
   origin: 'local' | 'import' | 'call'
   createdAt: number
   durationS: number | null
+  /** what this conversation was about, written by the harvester from the
+   * insights it proposed — null until a harvest has produced some */
+  summary: string | null
   error: string | null
   /** fully reviewed (no proposals left) — the list dims these (derived server-side) */
   curated: boolean
