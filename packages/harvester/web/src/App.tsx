@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type Session, type SessionDetail } from './api'
 import { onServerEvent } from './socket'
+import { ToTopButton } from './components/ToTopButton'
 import { CallLinksView } from './views/CallLinksView'
 import { RecordingOpenView } from './views/RecordingOpenView'
 import { LabelView } from './views/LabelView'
@@ -129,17 +130,23 @@ function SessionScreen({ detail, refresh, onError }: {
   onError: (e: string) => void
 }) {
   const { status, origin } = detail.session
-  if (status === 'calling') {
-    return origin === 'local'
-      ? <RecordingOpenView detail={detail} onError={onError} />
-      : <CallLinksView detail={detail} onError={onError} />
-  }
-  if (status === 'transcribing' || status === 'harvesting') {
-    return <PipelineView detail={detail} />
-  }
-  if (status === 'labeling') {
-    return <LabelView detail={detail} onError={onError} />
-  }
-  // reviewing | exported | failed → review is the home screen (re-entrant)
-  return <ReviewView detail={detail} refresh={refresh} onError={onError} />
+  const screen = (() => {
+    if (status === 'calling') {
+      return origin === 'local'
+        ? <RecordingOpenView detail={detail} onError={onError} />
+        : <CallLinksView detail={detail} onError={onError} />
+    }
+    if (status === 'transcribing' || status === 'harvesting') {
+      return <PipelineView detail={detail} />
+    }
+    if (status === 'labeling') {
+      return <LabelView detail={detail} onError={onError} />
+    }
+    // reviewing | exported | failed → review is the home screen (re-entrant)
+    return <ReviewView detail={detail} refresh={refresh} onError={onError} />
+  })()
+  // Every session screen gets it, not just review: it shows itself only once
+  // there's something to scroll back from, so on the short ones it simply
+  // never appears.
+  return <>{screen}<ToTopButton /></>
 }

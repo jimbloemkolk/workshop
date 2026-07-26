@@ -362,6 +362,33 @@ blockquote {
   background: var(--surface); border: 1px solid var(--accent); border-radius: 3px;
   padding: 0.5rem 0.8rem; font-size: 0.85rem;
 }
+/* Back to the top of the session. Bottom-left because that gutter is the
+   one empty part of the page — the right margin carries the braces and the
+   cards. A hairline circle in the app's own button vocabulary rather than a
+   filled floating-action blob, and it only turns sienna (the accent that
+   means "you can act here") under the pointer. Fixed, so it rides the page
+   scroll it acts on. */
+.to-top {
+  position: fixed; left: 1.4rem; bottom: 1.4rem; z-index: 20;
+  width: 2.7rem; height: 2.7rem; padding: 0;
+  display: grid; place-items: center;
+  border: 1px solid var(--rule); border-radius: 50%;
+  background: var(--surface); color: var(--muted);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  transition: color 0.15s ease, border-color 0.15s ease,
+              opacity 0.25s ease, transform 0.25s ease;
+}
+.to-top svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.to-top:hover { color: var(--accent); border-color: var(--accent); background: var(--surface); }
+.to-top:focus-visible { outline: 2px solid var(--quote); outline-offset: 2px; }
+/* Near the top there's nothing to go back from: it fades down and out of
+   reach of both the pointer and the tab order. */
+.to-top.away { opacity: 0; transform: translateY(0.5rem); pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  .to-top { transition: color 0.15s ease, border-color 0.15s ease; }
+  .to-top.away { transform: none; }
+}
+
 /* Stacked: there's no margin left of which to speak, so the cards stop
    sticking (they'd cover the transcript) and the brace stops being drawn —
    InsightConnector bails whenever the card isn't clear to the right of the
