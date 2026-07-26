@@ -57,7 +57,7 @@ export function SessionList({ sessions, onOpen, onStart, onStartCall, onImport, 
           <ul>
             {ongoing.map((s) => (
               <li key={s.id} onClick={() => onOpen(s.id)}>
-                <span className="title">{s.title}</span>
+                <div className="entry"><span className="title">{s.title}</span></div>
                 <span className={`status status-${s.status}`}>{s.status}</span>
                 <span className="muted">{new Date(s.createdAt).toLocaleString()}</span>
               </li>
@@ -69,7 +69,12 @@ export function SessionList({ sessions, onOpen, onStart, onStartCall, onImport, 
       <ul>
         {rest.map((s) => (
           <li key={s.id} className={s.curated ? 'curated' : undefined} onClick={() => onOpen(s.id)}>
-            <span className="title">{s.title}</span>
+            {/* Title and its summary are one column, stacked — everything
+                else keeps a column of its own (see .list li). */}
+            <div className="entry">
+              <span className="title">{s.title}</span>
+              {s.summary && <p className="summary">{s.summary}</p>}
+            </div>
             <span className={`status status-${s.curated ? 'curated' : s.status}`}>
               {s.curated ? 'curated' : s.status}
             </span>
@@ -77,10 +82,6 @@ export function SessionList({ sessions, onOpen, onStart, onStartCall, onImport, 
               {new Date(s.createdAt).toLocaleString()} · {fmtTime(s.durationS)}
             </span>
             <button className="danger small" onClick={(e) => remove(e, s)}>✕ delete</button>
-            {/* Wraps onto its own line under the row (see .list li .summary).
-                Absent until a harvest has proposed something to write it
-                from, so the row simply stays as it was. */}
-            {s.summary && <p className="summary">{s.summary}</p>}
           </li>
         ))}
       </ul>

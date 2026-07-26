@@ -119,21 +119,39 @@ button.small { font-size: 0.6rem; padding: 0.3rem 0.6rem; }
 .list { min-height: 60vh; border: 1px dashed transparent; border-radius: 3px; padding: 0.25rem; }
 .list.dragging { border-color: var(--accent); background: var(--accent-soft); }
 .dropzone { color: var(--muted); font-size: 0.65rem; font-weight: 400; }
-.list ul { list-style: none; padding: 0; margin-top: 2rem; border-top: 1px solid var(--rule); }
+/* Four columns — entry | status | when | delete — declared on the list and
+   inherited by every row through subgrid, so a long status word in one
+   session can't shove the date and the button out of line with the session
+   above it. The row keeps being its own box (border, hover, padding), which
+   `display: contents` would have thrown away. Without subgrid the same
+   template still applies per row: columns then size themselves row by row,
+   which is where this started, rather than collapsing. */
+.list ul {
+  list-style: none; padding: 0; margin-top: 2rem;
+  border-top: 1px solid var(--rule);
+  display: grid; grid-template-columns: 1fr auto auto auto;
+}
 .list li {
-  display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: baseline; padding: 0.9rem 0.4rem;
+  grid-column: 1 / -1;
+  display: grid; grid-template-columns: 1fr auto auto auto;
+  gap: 1.25rem; align-items: baseline; padding: 0.9rem 0.4rem;
   border-bottom: 1px solid var(--rule); cursor: pointer;
   transition: background-color 0.15s ease;
 }
+@supports (grid-template-columns: subgrid) {
+  .list li { grid-template-columns: subgrid; }
+}
 .list li:hover { background: var(--surface); }
-.list li .title { flex: 1; font-size: 1.1rem; font-weight: 600; }
-/* What the conversation was about, on its own line under the row: a full
-   flex basis is what breaks it there, so the title/status/date line above
-   keeps the layout it always had. Serif and roomy — this is the one piece
-   of prose in the table of contents, and it reads like a caption, not a
-   field. Clamped so a long one can't push the next session off the page. */
+/* The first column is the entry itself: title, and beneath it what the
+   conversation was about. min-width: 0 lets it be narrower than its longest
+   line instead of forcing the row wider. */
+.list li .entry { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.list li .title { font-size: 1.1rem; font-weight: 600; }
+/* The one piece of prose in this table of contents — it reads as a caption
+   under the title, not as another field in the row. Clamped to two lines so
+   a long one can't push the next session off the page. */
 .list li .summary {
-  flex-basis: 100%; margin: 0.1rem 0 0;
+  margin: 0;
   color: var(--muted); font-size: 0.94rem; line-height: 1.5;
   max-width: 62ch;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
