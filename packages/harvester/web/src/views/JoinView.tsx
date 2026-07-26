@@ -4,6 +4,7 @@ import {
   type LocalTrackPublication, type Participant, type RemoteTrack, type RemoteTrackPublication,
 } from 'livekit-client'
 import { api } from '../api'
+import { createCallChimes } from '../chimes'
 import { MarkButton, type MarkChannel } from '../components/MarkButton'
 import { getSettings } from '../settings'
 import { createCallSocket, type ServerEvent } from '../socket'
@@ -451,6 +452,25 @@ function InCall({ room, sessionId, token, title, initialSpeakerId, onEnded, onEr
   // participants (not you) with an open span right now — the multiplayer
   // half of marking: their press shows here as a quiet halo
   const [remoteMarking, setRemoteMarking] = useState<string[]>([])
+  // …and its mirror, because the gongs have to be rung on the *edges* of
+  // that set and a React state updater is the wrong place to do it: it's
+  // meant to be pure, and StrictMode calls it twice, which would strike the
+  // bell twice. Comparing against the ref keeps the decision outside render
+  // entirely, and also swallows a repeated broadcast of the same edge.
+  const remoteMarkingRef = useRef<string[]>([])
+  const setRemoteMarks = useCallback((next: string[]) => {
+    remoteMarkingRef.current = next
+    setRemoteMarking(next)
+  }, [])
+
+  // The call's four signals. One engine for the life of the call — it owns
+  // an AudioContext, so it is not something to build per sound.
+  const chimes = useMemo(() => createCallChimes(), [])
+  useEffect(() => () => chimes.close(), [chimes])
+  // Gongs follow the call's own output device: with earbuds in, a gong out
+  // of the laptop speakers would be startling and, being in front of the
+  // microphone, recorded.
+  useEffect(() => { chimes.setSink(speakerId) }, [chimes, speakerId])
 
   useEffect(() => {
     // verified socket to the harvester backend — marks ride this
@@ -469,31 +489,46 @@ function InCall({ room, sessionId, token, title, initialSpeakerId, onEnded, onEr
       const m = e.marker
       if (!m?.participant || m.participant === identity) return
       const who = m.participant
-      setRemoteMarking((prev) => m.endS == null
-        ? (prev.includes(who) ? prev : [...prev, who])
-        : prev.filter((p) => p !== who))
+      const open = m.endS == null
+      const known = remoteMarkingRef.current.includes(who)
+      if (open === known) return // a repeat of an edge we've already rung
+      setRemoteMarks(open
+        ? [...remoteMarkingRef.current, who]
+        : remoteMarkingRef.current.filter((p) => p !== who))
+      // Marking is a two-person gesture, so their mark sounds here too —
+      // the gong means "a mark was taken", not "you pressed the button".
+      if (open) chimes.markStart()
+      else chimes.markEnd()
     })
-    // seed for a mid-span (re)join: any already-open marks by the others
+    // seed for a mid-span (re)join: any already-open marks by the others.
+    // Silent by design — these spans were opened before you arrived, and
+    // gonging history at a newcomer would be a lie about what just happened.
     api.detail(sessionId)
-      .then((d) => setRemoteMarking(d.markers
+      .then((d) => setRemoteMarks(d.markers
         .filter((m) => m.participant && m.participant !== identity && m.endS == null)
         .map((m) => m.participant!)))
       .catch(() => {})
     return () => { socket.disconnect() }
-  }, [token, sessionId, identity])
+  }, [token, sessionId, identity, chimes, setRemoteMarks])
 
+  // The gongs ring on your own edges straight away rather than waiting for
+  // the server's broadcast to come back: the sound is confirmation of the
+  // gesture, and confirmation that arrives a round-trip late (or never,
+  // when the socket is down and the mark is queued) isn't confirmation.
   const markChannel = useMemo<MarkChannel>(() => ({
     down: () => {
       const s = socketRef.current
       if (s?.connected) s.emit('marker:down')
       else queueRef.current.push({ kind: 'down', atMs: Date.now() })
+      chimes.markStart()
     },
     up: (mode) => {
       const s = socketRef.current
       if (s?.connected) s.emit('marker:up', { mode })
       else queueRef.current.push({ kind: 'up', atMs: Date.now(), mode })
+      chimes.markEnd()
     },
-  }), [])
+  }), [chimes])
 
   // client-reported connection signals refine gap direction server-side
   useEffect(() => {
@@ -556,11 +591,23 @@ function InCall({ room, sessionId, token, title, initialSpeakerId, onEnded, onEr
     const onTrackOff = (track: RemoteTrack) => { track.detach().forEach((el) => el.remove()) }
     const onState = (state: ConnectionState) => setConnection(state)
     const onDisconnect = () => onEnded()
+    // The door, announced. Never for the egress recorder — it joins the room
+    // like a participant, and it arriving is not somebody arriving.
+    // ParticipantConnected only fires for arrivals *after* you, so whoever
+    // was already here when you joined is (correctly) silent.
+    const onJoin = (p: RemoteParticipant) => {
+      if (!isEgress(p)) chimes.joined()
+      refreshOthers()
+    }
+    const onLeave = (p: RemoteParticipant) => {
+      if (!isEgress(p)) chimes.left()
+      refreshOthers()
+    }
     room
       .on(RoomEvent.TrackSubscribed, onTrack)
       .on(RoomEvent.TrackUnsubscribed, onTrackOff)
-      .on(RoomEvent.ParticipantConnected, refreshOthers)
-      .on(RoomEvent.ParticipantDisconnected, refreshOthers)
+      .on(RoomEvent.ParticipantConnected, onJoin)
+      .on(RoomEvent.ParticipantDisconnected, onLeave)
       .on(RoomEvent.ConnectionStateChanged, onState)
       .on(RoomEvent.Disconnected, onDisconnect)
     // whoever was already in the room published (and got auto-subscribed)
@@ -593,12 +640,12 @@ function InCall({ room, sessionId, token, title, initialSpeakerId, onEnded, onEr
       room
         .off(RoomEvent.TrackSubscribed, onTrack)
         .off(RoomEvent.TrackUnsubscribed, onTrackOff)
-        .off(RoomEvent.ParticipantConnected, refreshOthers)
-        .off(RoomEvent.ParticipantDisconnected, refreshOthers)
+        .off(RoomEvent.ParticipantConnected, onJoin)
+        .off(RoomEvent.ParticipantDisconnected, onLeave)
         .off(RoomEvent.ConnectionStateChanged, onState)
         .off(RoomEvent.Disconnected, onDisconnect)
     }
-  }, [room, onEnded])
+  }, [room, onEnded, chimes])
 
   const toggleMute = useCallback(async () => {
     try {
