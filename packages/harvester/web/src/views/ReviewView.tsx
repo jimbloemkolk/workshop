@@ -234,6 +234,12 @@ export function ReviewView({ detail, refresh, onError }: {
           sessionId={id}
         />
       </div>
+      {/* What this conversation was about, in full — the overview list shows
+          the same sentences clamped to two lines, and this is where you can
+          actually read them. Absent until a harvest has written one. */}
+      {detail.session.summary && (
+        <p className="session-summary">{detail.session.summary}</p>
+      )}
       <section className="transcript" ref={transcriptRef}>
         {transcript ? (
           <TranscriptPane

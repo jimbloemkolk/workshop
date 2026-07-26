@@ -210,9 +210,25 @@ blockquote {
 }
 
 /* review — the manuscript and its margin notes */
-/* The gap is a margin, not a gutter: the braces live in it, four lanes of
-   them, so it has to be wide enough for a vertical run plus its corners. */
-.review { display: grid; grid-template-columns: 1.2fr 1fr; gap: 3rem; align-items: start; }
+/* The column gap is a margin, not a gutter: the braces live in it, four
+   lanes of them, so it has to be wide enough for a vertical run plus its
+   corners. Rows sit closer than that — the player, the summary and the
+   conversation are one stacked header, not three separated blocks. */
+.review {
+  display: grid; grid-template-columns: 1.2fr 1fr;
+  gap: 1.6rem 3rem; align-items: start;
+}
+/* The session's own summary, full and unclipped (the overview list clamps
+   the same sentences to two lines). Spans both columns and holds a reading
+   measure regardless: it's the one thing on this screen you read as prose
+   before working through the transcript beside it. */
+.session-summary {
+  grid-column: 1 / -1;
+  margin: 0; padding: 0 0 0 0.9rem;
+  border-left: 2px solid var(--quote);
+  max-width: 70ch;
+  font-size: 1.05rem; line-height: 1.7; color: var(--ink);
+}
 /* No inner scrollport anywhere in this view: the conversation column runs to
    its full height and the *page* scrolls, so there's exactly one scrollbar
    instead of one per column. The right column is always the shorter of the
