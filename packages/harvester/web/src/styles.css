@@ -27,8 +27,12 @@
      "this passage is what the card on the right quotes", and it's the same
      hue as the brace drawn between the two. */
   --quote: #257287;
-  --quote-soft: #cfe3ec;                    /* ~22% quote over white — selected */
-  --quote-wash: rgba(37, 114, 135, 0.11);   /* the standing light on every quote */
+  /* The two highlighter weights. Solid, not translucent, on the light
+     ground: the parchment is warm, and a transparent teal laid over it
+     drags that warmth through and comes out a muddy grey-green. Mixed
+     against white instead, the blue stays blue at any strength. */
+  --quote-soft: #b3d8e8;                    /* the selected quote */
+  --quote-wash: #d3e7f0;                    /* the standing light on every quote */
   --serif: "Iowan Old Style", Charter, "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
   --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
@@ -51,8 +55,11 @@
     /* Ulysses blue lifted toward its light tint so it reads on deep navy;
        the highlight goes translucent so the ink underneath stays crisp. */
     --quote: #7fb6c9;
-    --quote-soft: rgba(127, 182, 201, 0.26);
-    --quote-wash: rgba(127, 182, 201, 0.1);
+    /* Translucent here, unlike the light theme: on deep navy the highlight
+       has to lift the ground rather than replace it, or pale ink on a pale
+       fill goes unreadable. */
+    --quote-soft: rgba(127, 182, 201, 0.34);
+    --quote-wash: rgba(127, 182, 201, 0.16);
   }
 }
 

@@ -310,7 +310,10 @@ type ConnectorLink = { id: number; title: string; startWord: number; endWord: nu
 /** One drawn brace, in viewport pixels. */
 type LinkGeometry = {
   id: number; title: string; selected: boolean
-  bracket: string; line: string
+  /** The margin bracket beside the quoted words — null when the passage
+   * itself is scrolled off the window and there is nothing to bracket. */
+  bracket: string | null
+  line: string
   /** Where the line lands on its card — null when the card is scrolled out
    * of the list and the line runs off the window instead. */
   dot: { x: number; y: number } | null
@@ -329,11 +332,14 @@ type LinkGeometry = {
  * scrollports — the page and the card list — are handled by the same thing:
  * on any scroll, measure again.
  *
- * Every quoted passage on screen has a line, always — that's the point of
- * them. A card scrolled out of its own list doesn't take its line with it:
- * the line ends at the edge the card went past, still pointing the right
- * way. Only a passage that has itself scrolled off the window drops its
- * line, there being nothing left to point at.
+ * Anything on screen at either end has a line, always — that's the point of
+ * them, and the rule is symmetric. Scroll a card out of its list and its
+ * line stays with the passage, running off the window in its lane instead
+ * of stopping at the card. Scroll the passage out of the page and its line
+ * stays with the card, leaving the window on the side the words went. A
+ * link goes dark only when neither end is on screen. What a line never does
+ * is stop at the edge it fell out of: that lands it exactly where some
+ * other card or paragraph has scrolled into, and reads as pointing there.
  *
  * The lines are clickable (that's what the invisible fat `link-hit` stroke
  * is for): picking one selects its insight and fetches the card. */
@@ -393,10 +399,6 @@ function InsightConnector({ paneRef, links, selectedId, ready, onPick }: {
         if (firstR.height === 0) continue
         const top = firstR.top
         const bottom = Math.max(lastR.bottom, firstR.bottom)
-        // Off the top or bottom of the window: the passage end has nothing to
-        // point at, so this link sits the frame out.
-        if (bottom < 0 || top > window.innerHeight) continue
-
         const cardR = card.getBoundingClientRect()
         // Half-pixel offsets put the hairline strokes on a device pixel
         // boundary instead of straddling two — the difference between a
@@ -415,48 +417,68 @@ function InsightConnector({ paneRef, links, selectedId, ready, onPick }: {
           (Math.max(top, 0) + Math.min(bottom, window.innerHeight)) / 2,
         ) + 0.5
 
-        // The list is its own scrollport, so the card may be scrolled out of
-        // it. Such a line must NOT be pulled back to the list's edge — it
-        // would arrive exactly where some other card happens to sit and read
-        // as though it pointed there. It runs off the window instead, in its
-        // own lane: "this one is further down, keep scrolling", claiming
-        // nothing about whatever card is currently parked at that edge.
-        const offList = anchorY < listR.top + 4 ? -1 : anchorY > listR.bottom - 4 ? 1 : 0
-        const endX = offList === 0 ? cardX : channel
-        const endY = offList === 0
-          ? Math.round(anchorY) + 0.5
-          : offList > 0 ? window.innerHeight : 0
+        // Both ends can wander off, and the rule is the same at either end:
+        // a line NEVER gets pulled back to the edge of the thing it fell out
+        // of, because it would land exactly where some other card (or
+        // paragraph) happens to sit and read as though it pointed there. It
+        // runs off the window instead, in its own lane — "this one is
+        // further down, keep scrolling" — claiming nothing about whatever
+        // has scrolled into that spot. -1 means off the top, 1 off the
+        // bottom, 0 attached.
+        const textAway = bottom < 0 ? -1 : top > window.innerHeight ? 1 : 0
+        const cardAway = anchorY < listR.top + 4 ? -1 : anchorY > listR.bottom - 4 ? 1 : 0
+        // Only when *neither* end is on screen is there nothing worth drawing.
+        if (textAway !== 0 && cardAway !== 0) continue
 
         // An elbow, not a diagonal: the margin is a few dozen pixels wide
         // while the card and the passage can be several hundred apart
         // vertically, and a bezier across that aspect ratio reads as a
-        // wobbling near-vertical line. Leaving the bracket horizontally,
-        // running the gutter, then entering the card horizontally keeps both
-        // ends tangent to what they connect, and keeps parallel links
-        // parallel. Corners are quarter-round, radius shrinking to fit
-        // whatever room is left; under a pixel of room, square it off (a
-        // degenerate arc is a smudge, an unrounded corner is just a corner).
-        const dir = endY >= midY ? 1 : -1
-        const r = Math.min(9, Math.abs(endY - midY) / 2, channel - x, Math.max(endX - channel, 9))
-        const turn = r < 1
-          ? `M${x} ${midY} H${channel} V${endY}`
-          : `M${x} ${midY} H${channel - r} Q${channel} ${midY} ${channel} ${midY + dir * r} V${endY}`
-        // Only a line that reaches a card turns into it and gets a dot; a
-        // runaway just carries on to the edge of the window.
-        const line = offList !== 0
-          ? turn
-          : r < 1
-            ? `${turn} H${endX}`
+        // wobbling near-vertical line. Leaving one end horizontally, running
+        // the gutter, then entering the other horizontally keeps both ends
+        // tangent to what they connect, and keeps parallel links parallel.
+        // Corners are quarter-round, radius shrinking to fit whatever room
+        // is left; under a pixel of room, square it off (a degenerate arc is
+        // a smudge, an unrounded corner is just a corner).
+        const edgeY = (away: number) => away > 0 ? window.innerHeight : 0
+        const corner = (fromX: number, fromY: number, toY: number, room: number) => {
+          const dir = toY >= fromY ? 1 : -1
+          const r = Math.min(9, Math.abs(toY - fromY) / 2, room)
+          const lead = fromX < channel ? channel - r : channel + r
+          return r < 1
+            ? `M${fromX} ${fromY} H${channel} V${toY}`
+            : `M${fromX} ${fromY} H${lead} Q${channel} ${fromY} ${channel} ${fromY + dir * r} V${toY}`
+        }
+
+        let line: string
+        if (textAway !== 0) {
+          // The passage is off screen: draw from the card outward instead,
+          // and let it leave the window on the side the words are on.
+          line = corner(cardX, Math.round(anchorY) + 0.5, edgeY(textAway), cardX - channel)
+        } else if (cardAway !== 0) {
+          line = corner(x, midY, edgeY(cardAway), channel - x)
+        } else {
+          // Both ends attached — the full brace, with a second corner
+          // turning into the card.
+          const cardY = Math.round(anchorY) + 0.5
+          const dir = cardY >= midY ? 1 : -1
+          const r = Math.min(9, Math.abs(cardY - midY) / 2, channel - x, cardX - channel)
+          line = r < 1
+            ? `M${x} ${midY} H${channel} V${cardY} H${cardX}`
             : `M${x} ${midY} H${channel - r} Q${channel} ${midY} ${channel} ${midY + dir * r}` +
-              ` V${endY - dir * r} Q${channel} ${endY} ${channel + r} ${endY} H${endX}`
+              ` V${cardY - dir * r} Q${channel} ${cardY} ${channel + r} ${cardY} H${cardX}`
+        }
+
         const tick = link.id === selectedId ? 7 : 4
         out.push({
           id: link.id,
           title: link.title,
           selected: link.id === selectedId,
-          bracket: `M${x - tick} ${Math.round(top)} H${x} V${Math.round(bottom)} H${x - tick}`,
+          // No words on screen, nothing to bracket.
+          bracket: textAway !== 0
+            ? null
+            : `M${x - tick} ${Math.round(top)} H${x} V${Math.round(bottom)} H${x - tick}`,
           line,
-          dot: offList === 0 ? { x: endX, y: endY } : null,
+          dot: cardAway === 0 ? { x: cardX, y: Math.round(anchorY) + 0.5 } : null,
         })
       }
       // Selected last = painted on top of the faint ones it crosses.
@@ -492,7 +514,7 @@ function InsightConnector({ paneRef, links, selectedId, ready, onPick }: {
     <svg className="connector">
       {geoms.map((g) => (
         <g key={`${g.id}${g.selected ? '·on' : ''}`} className={`link${g.selected ? ' selected' : ''}`}>
-          <path className="link-bracket" d={g.bracket} pathLength={1} />
+          {g.bracket && <path className="link-bracket" d={g.bracket} pathLength={1} />}
           <path className="link-line" d={g.line} pathLength={1} />
           {g.dot && <circle className="link-dot" cx={g.dot.x} cy={g.dot.y} r={g.selected ? 3 : 2} />}
           {/* The hit target — one fat invisible stroke over both subpaths,
@@ -501,7 +523,7 @@ function InsightConnector({ paneRef, links, selectedId, ready, onPick }: {
               real control rather than decoration. */}
           <path
             className="link-hit"
-            d={`${g.bracket} ${g.line}`}
+            d={g.bracket ? `${g.bracket} ${g.line}` : g.line}
             role="button"
             aria-label={`insight: ${g.title}`}
             onClick={() => onPick(g.id)}
