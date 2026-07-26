@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { api, type Insight, type SessionDetail, type Transcript } from '../api'
 import { useRangePlayer, type RangePlayer } from '../audio'
 import { SnippetPlayer } from '../components/SnippetPlayer'
@@ -25,8 +25,15 @@ export function ReviewView({ detail, refresh, onError }: {
 }) {
   const id = detail.session.id
   const player = useRangePlayer(id)
+  const transcriptRef = useRef<HTMLElement | null>(null)
   const [transcript, setTranscript] = useState<Transcript | null>(null)
-  const [selected, setSelected] = useState<number | null>(null)
+  // The selection carries where it came from, because that decides what has
+  // to be brought into view: pick a card and you want its words; pick a
+  // brace (or make an insight out of a text selection) and the words are
+  // already under your eyes — it's the card, possibly scrolled out of its
+  // list, that needs to come to you.
+  const [selection, setSelection] = useState<{ id: number; focus: 'text' | 'card' } | null>(null)
+  const selected = selection?.id ?? null
   const [newMode, setNewMode] = useState<{ start: number | null }>({ start: null })
   const [newModeOn, setNewModeOn] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -157,7 +164,7 @@ export function ReviewView({ detail, refresh, onError }: {
       const newDetail = await api.manualInsight(id, startWord, endWord)
       const created = newDetail.insights.find((i) => !existingIds.has(i.id))
       setNewModeOn(false)
-      if (created) setSelected(created.id)
+      if (created) setSelection({ id: created.id, focus: 'card' })
       refresh()
     } catch (e) { onError(String(e)) } finally { setBusy(false) }
   }
@@ -180,6 +187,41 @@ export function ReviewView({ detail, refresh, onError }: {
   // something in those modes regardless of whether audio is playing.
   const wordsAreSelectable = !newModeOn && !current && player.playingKey == null
 
+  // Bring the far end of a new selection into view — which end depends on
+  // where the selection came from (see `selection`). Keyed on the selection
+  // object, deliberately: nudging the range with the ⟨− / +⟩ buttons also
+  // repaints the highlight, and re-centering on every single-word step would
+  // make trimming a boundary feel like the text was fighting back.
+  useEffect(() => {
+    if (!selection) return
+    const target = selection.focus === 'text'
+      ? transcriptRef.current?.querySelector('.word.hl')
+      : document.querySelector(`.snippet-list [data-insight-id="${selection.id}"]`)
+    target?.scrollIntoView({ block: selection.focus === 'text' ? 'center' : 'nearest', behavior: 'smooth' })
+  }, [selection])
+
+  // Every word any insight quotes, so the transcript can carry all of their
+  // highlights at once instead of only the selected one's — the harvest
+  // should be legible in the text itself while you read past it.
+  const quotedWords = useMemo(() => {
+    const words = new Set<number>()
+    for (const i of insights) {
+      if (!i.main) continue
+      for (let w = i.main.startWord; w < i.main.endWord; w++) words.add(w)
+    }
+    return words
+  }, [insights])
+
+  // One brace per anchored insight, in the same conversation order the cards
+  // are in — which is what keeps the braces from crossing: two lists in the
+  // same order connect with parallel lines. `lane` staggers them across the
+  // margin so neighbours don't share a vertical run and read as one line;
+  // it's the position in the whole list, not among the visible ones, so a
+  // brace never hops lanes just because another scrolled out of view.
+  const links = useMemo(() => sortedInsights.flatMap((i, k) => i.main
+    ? [{ id: i.id, title: i.title, startWord: i.main.startWord, endWord: i.main.endWord, lane: k % 4 }]
+    : []), [sortedInsights])
+
   return (
     <main className="review">
       <div className="session-bar">
@@ -192,12 +234,13 @@ export function ReviewView({ detail, refresh, onError }: {
           sessionId={id}
         />
       </div>
-      <section className="transcript">
+      <section className="transcript" ref={transcriptRef}>
         {transcript ? (
           <TranscriptPane
             transcript={transcript}
             speakerName={speakerName}
             highlight={current}
+            quotedWords={quotedWords}
             pendingStart={newModeOn ? newMode.start : null}
             onWordClick={onWordClick}
             playheadS={player.activeKey != null ? player.position : null}
@@ -211,7 +254,7 @@ export function ReviewView({ detail, refresh, onError }: {
         <div className="row toolbar">
           <button
             className={newModeOn ? 'primary' : ''}
-            onClick={() => { setNewModeOn(!newModeOn); setNewMode({ start: null }); setSelected(null) }}
+            onClick={() => { setNewModeOn(!newModeOn); setNewMode({ start: null }); setSelection(null) }}
           >
             {newModeOn
               ? (newMode.start == null ? 'click first word…' : 'click last word…')
@@ -219,22 +262,255 @@ export function ReviewView({ detail, refresh, onError }: {
           </button>
           <button onClick={reharvest}>↻ re-harvest</button>
         </div>
-        {insights.length === 0 && <p className="muted">No proposals yet.</p>}
-        {sortedInsights.map((i) => (
-          <InsightCard
-            key={i.id}
-            insight={i}
-            attention={attention.get(i.id) ?? []}
-            selected={i.id === selected}
-            onSelect={() => { setSelected(i.id); setNewModeOn(false) }}
-            player={player}
-            range={wordRangeTimes(i.main?.startWord ?? 0, i.main?.endWord ?? 0)}
-            fallbackDuration={detail.session.durationS}
-            onPatch={(p) => patch(i.id, p)}
-          />
-        ))}
+        {/* The one scrollport that isn't the page: hunting for a card in a
+            long list shouldn't mean scrolling the conversation past it. The
+            toolbar stays outside it, so it never scrolls away. */}
+        <div className="snippet-list">
+          {insights.length === 0 && <p className="muted">No proposals yet.</p>}
+          {sortedInsights.map((i) => (
+            <InsightCard
+              key={i.id}
+              insight={i}
+              attention={attention.get(i.id) ?? []}
+              selected={i.id === selected}
+              // Click the selected card again to let it go: the highlight,
+              // the brace and the word-click editing mode all hang off this
+              // selection, and clicking the card you're already on is the
+              // obvious way to ask for the plain transcript back.
+              onSelect={() => {
+                setSelection(i.id === selected ? null : { id: i.id, focus: 'text' })
+                setNewModeOn(false)
+              }}
+              player={player}
+              range={wordRangeTimes(i.main?.startWord ?? 0, i.main?.endWord ?? 0)}
+              fallbackDuration={detail.session.durationS}
+              onPatch={(p) => patch(i.id, p)}
+            />
+          ))}
+        </div>
       </aside>
+      <InsightConnector
+        paneRef={transcriptRef}
+        links={links}
+        selectedId={selected}
+        ready={transcript != null}
+        onPick={(pickedId) => {
+          setSelection(pickedId === selected ? null : { id: pickedId, focus: 'card' })
+          setNewModeOn(false)
+        }}
+      />
     </main>
+  )
+}
+
+/** One insight's line: which words it quotes, and which lane of the margin
+ * its vertical run uses. */
+type ConnectorLink = { id: number; title: string; startWord: number; endWord: number; lane: number }
+
+/** One drawn brace, in viewport pixels. */
+type LinkGeometry = {
+  id: number; title: string; selected: boolean
+  bracket: string; line: string
+  /** Where the line lands on its card — null when the card is scrolled out
+   * of the list and the line runs off the window instead. */
+  dot: { x: number; y: number } | null
+}
+
+/** The braces: a hairline from every card, across the margin, to a bracket
+ * beside the words it quotes — faint for all of them, drawn in and solid for
+ * the selected one. Standing links, not just a selection indicator: at a
+ * glance the transcript shows which of it has been harvested and by which
+ * card, without anything having to be clicked.
+ *
+ * Measured from the live DOM rather than derived from word indexes, because
+ * the one thing that decides where a run of words *is* on screen is line
+ * wrapping, and only layout knows that. Everything is in viewport
+ * coordinates (getBoundingClientRect ↔ a position:fixed SVG), so both
+ * scrollports — the page and the card list — are handled by the same thing:
+ * on any scroll, measure again.
+ *
+ * Every quoted passage on screen has a line, always — that's the point of
+ * them. A card scrolled out of its own list doesn't take its line with it:
+ * the line ends at the edge the card went past, still pointing the right
+ * way. Only a passage that has itself scrolled off the window drops its
+ * line, there being nothing left to point at.
+ *
+ * The lines are clickable (that's what the invisible fat `link-hit` stroke
+ * is for): picking one selects its insight and fetches the card. */
+function InsightConnector({ paneRef, links, selectedId, ready, onPick }: {
+  paneRef: RefObject<HTMLElement | null>
+  links: ConnectorLink[]
+  selectedId: number | null
+  /** Whether the transcript has rendered — word spans to measure against
+   * don't exist before it has, and no scroll or resize event announces
+   * their arrival. */
+  ready: boolean
+  onPick: (id: number) => void
+}) {
+  const [geoms, setGeoms] = useState<LinkGeometry[]>([])
+
+  useLayoutEffect(() => {
+    if (!ready || links.length === 0) { setGeoms([]); return }
+    let frame = 0
+    // Word spans are keyed and long-lived; React reconciles their classes in
+    // place rather than replacing them, so indexing them once per transcript
+    // beats a querySelector per link per frame (which, on a long transcript,
+    // is a subtree scan per link — the difference between smooth scrolling
+    // and not). Anything that does get detached measures 0×0 and is skipped.
+    const wordEls = new Map<number, HTMLElement>()
+    for (const el of paneRef.current?.querySelectorAll<HTMLElement>('[data-word-index]') ?? []) {
+      wordEls.set(Number(el.dataset.wordIndex), el)
+    }
+
+    const measure = () => {
+      frame = 0
+      const pane = paneRef.current
+      if (!pane) { setGeoms([]); return }
+      const paneR = pane.getBoundingClientRect()
+      const list = document.querySelector<HTMLElement>('.snippet-list')
+      if (!list) { setGeoms([]); return }
+      // Narrower than this and there's no margin to run through, only text to
+      // draw over — that's the stacked layout, where the braces stay away.
+      const listR = list.getBoundingClientRect()
+      if (listR.left - paneR.right < 36) { setGeoms([]); return }
+
+      const cardEls = new Map<number, HTMLElement>()
+      for (const el of list.querySelectorAll<HTMLElement>('[data-insight-id]')) {
+        cardEls.set(Number(el.dataset.insightId), el)
+      }
+
+      const out: LinkGeometry[] = []
+      for (const link of links) {
+        const card = cardEls.get(link.id)
+        // endWord is exclusive; the run is contiguous in document order, so
+        // its first and last words bound it vertically however many lines it
+        // wraps across — no need to measure the ones in between.
+        const first = wordEls.get(link.startWord)
+        const last = wordEls.get(link.endWord - 1) ?? first
+        if (!card || !first || !last) continue
+        const firstR = first.getBoundingClientRect()
+        const lastR = last.getBoundingClientRect()
+        if (firstR.height === 0) continue
+        const top = firstR.top
+        const bottom = Math.max(lastR.bottom, firstR.bottom)
+        // Off the top or bottom of the window: the passage end has nothing to
+        // point at, so this link sits the frame out.
+        if (bottom < 0 || top > window.innerHeight) continue
+
+        const cardR = card.getBoundingClientRect()
+        // Half-pixel offsets put the hairline strokes on a device pixel
+        // boundary instead of straddling two — the difference between a
+        // hairline and a smudge.
+        const x = Math.round(paneR.right + 5 + link.lane * 2) + 0.5    // bracket, by the text
+        const channel = Math.round(paneR.right + 16 + link.lane * 6) + 0.5 // the vertical run
+        const cardX = Math.round(cardR.left) - 0.5                     // dot on the card's edge
+        // Meet the card at its title, not its centre — cards grow downward as
+        // they expand, and an anchor that slides around while you work the
+        // accept/reject row looks unmoored.
+        const anchorY = Math.min(Math.max(cardR.top + 26, cardR.top + 12), cardR.bottom - 12)
+        // Leave from the middle of the *visible* part of the passage: a long
+        // quote can run off the top of the window, and its true midpoint
+        // would take the line off screen with it.
+        const midY = Math.round(
+          (Math.max(top, 0) + Math.min(bottom, window.innerHeight)) / 2,
+        ) + 0.5
+
+        // The list is its own scrollport, so the card may be scrolled out of
+        // it. Such a line must NOT be pulled back to the list's edge — it
+        // would arrive exactly where some other card happens to sit and read
+        // as though it pointed there. It runs off the window instead, in its
+        // own lane: "this one is further down, keep scrolling", claiming
+        // nothing about whatever card is currently parked at that edge.
+        const offList = anchorY < listR.top + 4 ? -1 : anchorY > listR.bottom - 4 ? 1 : 0
+        const endX = offList === 0 ? cardX : channel
+        const endY = offList === 0
+          ? Math.round(anchorY) + 0.5
+          : offList > 0 ? window.innerHeight : 0
+
+        // An elbow, not a diagonal: the margin is a few dozen pixels wide
+        // while the card and the passage can be several hundred apart
+        // vertically, and a bezier across that aspect ratio reads as a
+        // wobbling near-vertical line. Leaving the bracket horizontally,
+        // running the gutter, then entering the card horizontally keeps both
+        // ends tangent to what they connect, and keeps parallel links
+        // parallel. Corners are quarter-round, radius shrinking to fit
+        // whatever room is left; under a pixel of room, square it off (a
+        // degenerate arc is a smudge, an unrounded corner is just a corner).
+        const dir = endY >= midY ? 1 : -1
+        const r = Math.min(9, Math.abs(endY - midY) / 2, channel - x, Math.max(endX - channel, 9))
+        const turn = r < 1
+          ? `M${x} ${midY} H${channel} V${endY}`
+          : `M${x} ${midY} H${channel - r} Q${channel} ${midY} ${channel} ${midY + dir * r} V${endY}`
+        // Only a line that reaches a card turns into it and gets a dot; a
+        // runaway just carries on to the edge of the window.
+        const line = offList !== 0
+          ? turn
+          : r < 1
+            ? `${turn} H${endX}`
+            : `M${x} ${midY} H${channel - r} Q${channel} ${midY} ${channel} ${midY + dir * r}` +
+              ` V${endY - dir * r} Q${channel} ${endY} ${channel + r} ${endY} H${endX}`
+        const tick = link.id === selectedId ? 7 : 4
+        out.push({
+          id: link.id,
+          title: link.title,
+          selected: link.id === selectedId,
+          bracket: `M${x - tick} ${Math.round(top)} H${x} V${Math.round(bottom)} H${x - tick}`,
+          line,
+          dot: offList === 0 ? { x: endX, y: endY } : null,
+        })
+      }
+      // Selected last = painted on top of the faint ones it crosses.
+      out.sort((a, b) => Number(a.selected) - Number(b.selected))
+      setGeoms(out)
+    }
+
+    // rAF-coalesced: scroll fires far more often than the frame it would
+    // paint into, and each pass reads layout for every link.
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(measure) }
+    measure()
+    window.addEventListener('scroll', schedule, true)
+    window.addEventListener('resize', schedule)
+    // Reflow the transcript (window width, a card expanding under the cursor)
+    // and everything moves with no scroll or resize event to say so.
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule)
+    if (paneRef.current) ro?.observe(paneRef.current)
+    ro?.observe(document.body)
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      window.removeEventListener('scroll', schedule, true)
+      window.removeEventListener('resize', schedule)
+      ro?.disconnect()
+    }
+  }, [paneRef, links, selectedId, ready])
+
+  if (geoms.length === 0) return null
+  // The key carries the selected state so selecting remounts that link's
+  // paths and replays the draw-in; a plain remeasure (scrolling) only
+  // updates `d` on the same elements, and must not replay anything. Links
+  // entering view mount fresh, which is what fades them in.
+  return (
+    <svg className="connector">
+      {geoms.map((g) => (
+        <g key={`${g.id}${g.selected ? '·on' : ''}`} className={`link${g.selected ? ' selected' : ''}`}>
+          <path className="link-bracket" d={g.bracket} pathLength={1} />
+          <path className="link-line" d={g.line} pathLength={1} />
+          {g.dot && <circle className="link-dot" cx={g.dot.x} cy={g.dot.y} r={g.selected ? 3 : 2} />}
+          {/* The hit target — one fat invisible stroke over both subpaths,
+              because a 1px hairline is not something anyone can click. The
+              <title> gives it a hover tooltip; role/aria-label make it a
+              real control rather than decoration. */}
+          <path
+            className="link-hit"
+            d={`${g.bracket} ${g.line}`}
+            role="button"
+            aria-label={`insight: ${g.title}`}
+            onClick={() => onPick(g.id)}
+          >
+            <title>{g.title}</title>
+          </path>
+        </g>
+      ))}
+    </svg>
   )
 }
 
@@ -293,12 +569,16 @@ function wordRangeFromSelection(sel: Selection): { start: number; end: number; r
 }
 
 function TranscriptPane({
-  transcript, speakerName, highlight, pendingStart, onWordClick, playheadS, isPlaying, selectable,
-  onCreateFromSelection,
+  transcript, speakerName, highlight, quotedWords, pendingStart, onWordClick, playheadS, isPlaying,
+  selectable, onCreateFromSelection,
 }: {
   transcript: Transcript
   speakerName: Map<string, string>
   highlight: Insight | null
+  /** Every word quoted by *any* insight. The selected one is drawn stronger
+   * on top of this (see `.word.hl`), but the standing wash is what makes the
+   * harvest visible while you're just reading. */
+  quotedWords: Set<number>
   pendingStart: number | null
   onWordClick: (index: number, shift: boolean) => void
   /** Absolute recording time of whatever's loaded into the shared player
@@ -451,13 +731,14 @@ function TranscriptPane({
             {(bySegment.get(seg.id) ?? []).map((w) => {
               const inHighlight = highlight?.main != null &&
                 w.index >= highlight.main.startWord && w.index < highlight.main.endWord
+              const isQuoted = !inHighlight && quotedWords.has(w.index)
               const isPending = pendingStart === w.index
               const isNowWord = w.index === activeWordIndex
               return (
                 <span
                   key={w.index}
                   data-word-index={w.index}
-                  className={`word${inHighlight ? ' hl' : ''}${isPending ? ' pending' : ''}${w.aligned ? '' : ' unaligned'}${isNowWord ? ' now-word' : ''}`}
+                  className={`word${inHighlight ? ' hl' : ''}${isQuoted ? ' quoted' : ''}${isPending ? ' pending' : ''}${w.aligned ? '' : ' unaligned'}${isNowWord ? ' now-word' : ''}`}
                   onClick={(e) => {
                     // A drag-selection's terminating mouseup can also fire a
                     // click on that same word — with an active (non-collapsed)
@@ -507,7 +788,13 @@ function InsightCard({ insight, attention, selected, onSelect, player, range, fa
   const i = insight
   const m = i.main
   return (
-    <div className={`card ${i.status}${selected ? ' selected' : ''}`} onClick={onSelect}>
+    // data-insight-id is how InsightConnector finds this card's end of its
+    // brace — DOM-measured, so the card has to be findable by insight.
+    <div
+      className={`card ${i.status}${selected ? ' selected' : ''}`}
+      data-insight-id={i.id}
+      onClick={onSelect}
+    >
       <div className="row">
         <span className={`origin origin-${i.origin}`}>{i.origin}</span>
         {m && !m.anchored && <span className="badge warn">unanchored</span>}
@@ -518,7 +805,10 @@ function InsightCard({ insight, attention, selected, onSelect, player, range, fa
       {m && <blockquote>{m.quote}</blockquote>}
       {i.description && <p className="note-text">{i.description}</p>}
       {i.supporting.length > 0 && (
-        <details>
+        // Expanding the supporting snippets is not a click on the card:
+        // without this, opening them on the selected card would toggle the
+        // selection off (see onSelect) and collapse what you just opened.
+        <details onClick={(e) => e.stopPropagation()}>
           <summary>{i.supporting.length} supporting snippet(s)</summary>
           {i.supporting.map((s) => (
             <blockquote key={s.id} className="support">

@@ -21,6 +21,14 @@
   --ok: #5f7d5b;            /* sage */
   --accent-wash: rgba(160, 82, 45, 0.12);   /* translucent sienna */
   --accent-glow: rgba(160, 82, 45, 0.28);
+  /* Ulysses blue — the quotation hue. L*ab(44.34, -15.73, -18.48) → #257287.
+     Deliberately a second voice alongside the sienna accent, never a
+     replacement: sienna means "playing / being edited", this blue means
+     "this passage is what the card on the right quotes", and it's the same
+     hue as the brace drawn between the two. */
+  --quote: #257287;
+  --quote-soft: #cfe3ec;                    /* ~22% quote over white — selected */
+  --quote-wash: rgba(37, 114, 135, 0.11);   /* the standing light on every quote */
   --serif: "Iowan Old Style", Charter, "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
   --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
@@ -40,6 +48,11 @@
     --ok: #8aa585;
     --accent-wash: rgba(201, 137, 90, 0.14);
     --accent-glow: rgba(201, 137, 90, 0.3);
+    /* Ulysses blue lifted toward its light tint so it reads on deep navy;
+       the highlight goes translucent so the ink underneath stays crisp. */
+    --quote: #7fb6c9;
+    --quote-soft: rgba(127, 182, 201, 0.26);
+    --quote-wash: rgba(127, 182, 201, 0.1);
   }
 }
 
@@ -161,9 +174,15 @@ blockquote {
 }
 
 /* review — the manuscript and its margin notes */
-.review { display: grid; grid-template-columns: 1.2fr 1fr; gap: 2rem; align-items: start; }
+/* The gap is a margin, not a gutter: the braces live in it, four lanes of
+   them, so it has to be wide enough for a vertical run plus its corners. */
+.review { display: grid; grid-template-columns: 1.2fr 1fr; gap: 3rem; align-items: start; }
+/* No inner scrollport anywhere in this view: the conversation column runs to
+   its full height and the *page* scrolls, so there's exactly one scrollbar
+   instead of one per column. The right column is always the shorter of the
+   two, so it sticks instead (see .snippets) rather than being clipped. */
 .transcript {
-  max-height: calc(100vh - 8rem); overflow-y: auto; padding-right: 0.75rem;
+  padding-right: 0.75rem;
   line-height: 1.9; font-size: 1.02rem;
 }
 /* Two-column layout: speaker name | spoken text, grid so both stay
@@ -208,7 +227,21 @@ blockquote {
    "click me", without needing any other visual change. */
 .segment-words.selectable .word { cursor: text; }
 .word:hover { background: var(--accent-wash); }
-.word.hl { background: var(--accent-soft); }
+/* Quoted passages: a soft light-blue highlighter run at the far end of the
+   brace drawn from each card (see .connector). Every insight's words carry
+   the light all the time — that's what makes the harvest legible while
+   you're simply reading — and the selected one deepens on top of it.
+   Rounded ends come free: each word span carries its own trailing space, so
+   a run of them paints as one continuous band with only the outer corners
+   visible. */
+.word.quoted {
+  background: var(--quote-wash);
+  box-shadow: 0 1px 0 var(--quote-wash), 0 -1px 0 var(--quote-wash);
+}
+.word.hl {
+  background: var(--quote-soft);
+  box-shadow: 0 1px 0 var(--quote-soft), 0 -1px 0 var(--quote-soft);
+}
 .word.pending { outline: 1px solid var(--accent); }
 .word.unaligned { text-decoration: underline dotted var(--warn); }
 /* "now speaking" — driven by playback position, distinct from .hl's solid
@@ -237,14 +270,77 @@ blockquote {
 }
 .selection-chip:hover { background: var(--accent-soft); }
 .insights { max-height: calc(100vh - 8rem); overflow-y: auto; display: flex; flex-direction: column; gap: 0.8rem; }
-.toolbar { position: sticky; top: 0; background: var(--paper); padding: 0.4rem 0; z-index: 1; }
+/* Margin notes stay put while the conversation moves: the column sticks to
+   the top of the viewport, never grows past it, and hands its overflow to
+   the card list inside rather than to the page. The page scroll stays the
+   conversation's alone — which is also what keeps the card end of the
+   connector brace on screen however far down the transcript you go. */
+.snippets {
+  position: sticky; top: 1rem; align-self: start;
+  max-height: calc(100vh - 2rem);
+  display: flex; flex-direction: column; gap: 0.8rem;
+}
+/* min-height: 0 is what actually lets this shrink — a flex item's automatic
+   minimum size is its content, so without it the list refuses to be smaller
+   than all its cards and overflows the column instead of scrolling. */
+.snippet-list {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 0.8rem;
+  padding-right: 0.4rem;
+  scrollbar-width: thin;
+}
+.toolbar { padding: 0.4rem 0; }
+/* The braces: hairlines tying every card to the words it quotes, drawn in
+   viewport coordinates on a fixed overlay (see InsightConnector). Two
+   weights only — a standing link faint enough to be read as texture in the
+   margin, and the selected one at full strength. Nothing in between, so
+   "which card am I on" is never a matter of squinting. */
+.connector { position: fixed; inset: 0; pointer-events: none; z-index: 15; overflow: visible; }
+/* :not(.link-hit) throughout — the hit path shares the geometry but none of
+   the paint, and it has to out-rank nothing to stay invisible. */
+.connector path:not(.link-hit) {
+  fill: none; stroke: var(--quote); stroke-linecap: round; stroke-linejoin: round;
+}
+.connector circle { fill: var(--quote); }
+.link { opacity: 0.34; animation: link-in 0.35s ease-out; }
+.link path:not(.link-hit) { stroke-width: 1; }
+.link:hover { opacity: 0.7; }
+.link.selected, .link.selected:hover { opacity: 1; }
+.link.selected path:not(.link-hit) { stroke-width: 1.25; }
+.link.selected .link-line { opacity: 0.8; }
+/* Clickable hairlines: the drawn strokes are 1px, so the hit target is a
+   separate invisible 13px stroke over the same two subpaths. pointer-events
+   re-enables hit testing that .connector turned off for the overlay as a
+   whole, and `stroke` keeps it to the band itself — the enclosed area of the
+   bracket and the elbow stays click-through, or the margin would eat clicks
+   meant for the text and the cards. */
+.link-hit {
+  stroke: transparent; stroke-width: 13; fill: none;
+  pointer-events: stroke; cursor: pointer;
+}
+/* pathLength=1 normalizes every path to a single unit-long dash, so one
+   keyframe draws a line in regardless of how long it actually is. Only the
+   selected link earns the draw-in: replaying it on all of them (whenever one
+   scrolls back into view) would make the margin twitch. */
+.link.selected .link-line,
+.link.selected .link-bracket { stroke-dasharray: 1; animation: brace-draw 0.5s ease-out; }
+.link.selected .link-dot { animation: brace-dot 0.5s ease-out; }
+@keyframes link-in { from { opacity: 0; } }
+@keyframes brace-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes brace-dot { 0%, 60% { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .link, .link path, .link circle { animation: none; }
+}
 .card {
   border: 1px solid var(--rule); border-radius: 3px; padding: 0.9rem 1.1rem;
   cursor: pointer; display: flex; flex-direction: column; gap: 0.45rem;
   background: var(--surface);
   transition: border-color 0.15s ease;
 }
-.card.selected { border-color: var(--accent); }
+/* Selected cards take the quotation blue, not the sienna accent: the card,
+   its brace and the highlighted words it points at are one object in three
+   places, and they should look like it. */
+.card.selected { border-color: var(--quote); }
 .card.rejected { opacity: 0.5; }
 .badge, .origin { font-size: 0.6rem; color: var(--muted); }
 .badge.accepted { color: var(--ok); }
@@ -259,7 +355,17 @@ blockquote {
   background: var(--surface); border: 1px solid var(--accent); border-radius: 3px;
   padding: 0.5rem 0.8rem; font-size: 0.85rem;
 }
-@media (max-width: 900px) { .review { grid-template-columns: 1fr; } }
+/* Stacked: there's no margin left of which to speak, so the cards stop
+   sticking (they'd cover the transcript) and the brace stops being drawn —
+   InsightConnector bails whenever the card isn't clear to the right of the
+   transcript column. */
+@media (max-width: 900px) {
+  .review { grid-template-columns: 1fr; }
+  /* Stacked, the cards are just another block in the page flow: no sticking,
+     no height cap, and so no inner scrollport either. */
+  .snippets { position: static; max-height: none; }
+  .snippet-list { overflow-y: visible; }
+}
 
 /* call: links view (main app) */
 .call-links { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.25rem; }
