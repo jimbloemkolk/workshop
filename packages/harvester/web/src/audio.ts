@@ -12,17 +12,42 @@ export interface RangePlayer {
    * play/pause events, never set imperatively, so it can't drift from what
    * the browser is really doing. */
   playingKey: string | null
-  /** Live position within the whole file, in seconds. Updated via
-   * requestAnimationFrame while playing (timeupdate only fires ~4x/s,
-   * which is choppy for a few-second range) and synchronously on
-   * toggle()/seek() so a paused scrubber doesn't wait a frame to catch up.
-   * Only meaningful for the snippet matching activeKey — subtract that
-   * snippet's own `start` to get an offset into its range. */
+  /** Coarse position snapshot, in seconds — updated synchronously by
+   * toggle()/seek()/playFrom() and on every native 'pause', but NOT on the
+   * 60fps tick while actively playing (that used to be exactly what it
+   * did, and re-rendering every consumer of this hook 60x/sec — the whole
+   * component tree under it — was the bug). Good for "where did we leave
+   * off": a paused scrubber, a just-completed seek, the instant right
+   * after mount. Wrong tool for anything that has to visibly track
+   * playback in real time — use getPosition()/subscribePosition() for
+   * that; they're updated every frame regardless. */
   position: number
   /** Whole-file duration once metadata has loaded, else null. A last-resort
    * bound for open-ended ranges (end === null) when the caller has no
    * better duration of its own to fall back to. */
   duration: number | null
+  /** The live position right now, in seconds — reading it never causes or
+   * implies a re-render. Always current (updated in the same rAF loop that
+   * used to drive `position`'s 60fps setState); the natural "give me a
+   * starting value" call when wiring up subscribePosition. */
+  getPosition(): number
+  /** Subscribe to the live position: `cb` fires once per animation frame
+   * while the element is actually playing — the same cadence `position`
+   * used to re-render React at — plus once synchronously whenever
+   * toggle()/seek()/playFrom() moves the playhead between frames, so a
+   * subscriber is never a stale tick behind after a seek. Returns an
+   * unsubscribe function; call it on cleanup or the callback leaks for the
+   * life of the shared audio element.
+   *
+   * This is the escape hatch from the bug above: a scrubber thumb or a
+   * sweeping timeline playhead can track playback at full frame rate by
+   * writing straight to the DOM from this callback (a ref, not state),
+   * instead of a 60fps signal forcing setState — and therefore a render of
+   * everything downstream — every single frame. Consumers that only need
+   * something CHANGE-driven (which transcript segment is active, say)
+   * should still setState, but only when the value they actually care
+   * about changes, not on every tick this fires. */
+  subscribePosition(cb: (positionS: number) => void): () => void
   /** Play/pause/resume a [start, end] range under `key`:
    *  - same key, currently playing → pause in place.
    *  - same key, paused mid-range (hasn't finished) → resume from currentTime.
@@ -44,6 +69,13 @@ export interface RangePlayer {
    * seek rides through, playback continues uninterrupted; anything else
    * (different key, or same key paused/finished) → seek then play(). */
   playFrom(key: string, start: number, end: number | null, offsetS: number): void
+  /** Pause if playing, resume if paused mid-range, or restart the active
+   * range from its own `start` if it already finished — all without the
+   * caller supplying start/end again, unlike toggle(). For a control (the
+   * floating play/pause button beside ToTopButton, say) that only ever
+   * acts on "whatever's currently loaded," not a specific [start, end] of
+   * its own. No-op when nothing is loaded (activeKey is null). */
+  togglePlayPause(): void
   stop(): void
 }
 
@@ -60,11 +92,38 @@ export function useRangePlayer(sessionId: string): RangePlayer {
   const keyRef = useRef<string | null>(null)
   const finishedRef = useRef(false)
   const rafRef = useRef<number | null>(null)
+  // The active range's own [start, end), remembered independently of
+  // `stopAt` — set alongside keyRef in toggle()/seek()/playFrom(), but
+  // (unlike stopAt) never cleared once the range finishes. `stopAt` IS the
+  // live "pause once you reach this" deadline and onTime nulls it out the
+  // moment that happens; togglePlayPause's restart-after-finish needs the
+  // ORIGINAL bounds to still be here to restore stopAt from, or a restart
+  // would play on to the end of the whole file instead of stopping again
+  // where this range does.
+  const rangeStartRef = useRef(0)
+  const rangeEndRef = useRef<number | null>(null)
+  // The live position and its subscribers both live outside React state —
+  // that's the entire fix for the "60fps re-renders everything" bug (see
+  // RangePlayer.subscribePosition's doc comment). Both are plain refs, so
+  // neither survives past this hook instance's lifetime, but both DO
+  // survive every render of it (unlike a local variable), which is exactly
+  // what a persistent subscriber list needs.
+  const positionRef = useRef(0)
+  const subscribersRef = useRef(new Set<(t: number) => void>())
 
   const [activeKey, setActiveKey] = useState<string | null>(null)
   const [playingKey, setPlayingKey] = useState<string | null>(null)
   const [position, setPosition] = useState(0)
   const [duration, setDuration] = useState<number | null>(null)
+
+  // Updates the live ref and fans out to every subscriber — cheap
+  // (iterating a handful of callbacks, no allocation). The 60fps tick loop
+  // below calls ONLY this, never setPosition: nothing in here touches
+  // React state, so nothing in here can trigger a render.
+  const notify = (t: number) => {
+    positionRef.current = t
+    for (const cb of subscribersRef.current) cb(t)
+  }
 
   useEffect(() => {
     const el = new Audio(api.audioUrl(sessionId))
@@ -74,7 +133,7 @@ export function useRangePlayer(sessionId: string): RangePlayer {
       if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
     }
     const tick = () => {
-      setPosition(el.currentTime)
+      notify(el.currentTime)
       rafRef.current = requestAnimationFrame(tick)
     }
 
@@ -87,10 +146,13 @@ export function useRangePlayer(sessionId: string): RangePlayer {
     }
     // 'pause' covers both explicit user pauses and the el.pause() above —
     // it's the single source of truth for playingKey turning off, and also
-    // where the rAF loop stops. 'ended' is a backstop for open-ended
-    // ranges (end === null) that run off the end of the file without ever
-    // hitting the stopAt check in onTime.
-    const onPause = () => { setPlayingKey(null); setPosition(el.currentTime); stopTick() }
+    // where the rAF loop stops. `position` (the coarse state) is refreshed
+    // here too, since a pause is exactly the kind of rare, real moment a
+    // paused scrubber should show the exact stopping point without waiting
+    // on a subscriber. 'ended' is a backstop for open-ended ranges
+    // (end === null) that run off the end of the file without ever hitting
+    // the stopAt check in onTime.
+    const onPause = () => { setPlayingKey(null); notify(el.currentTime); setPosition(el.currentTime); stopTick() }
     const onPlay = () => { setPlayingKey(keyRef.current); tick() }
     const onEnded = () => { finishedRef.current = true }
     const onMeta = () => setDuration(Number.isFinite(el.duration) ? el.duration : null)
@@ -104,8 +166,11 @@ export function useRangePlayer(sessionId: string): RangePlayer {
     keyRef.current = null
     finishedRef.current = false
     stopAt.current = null
+    rangeStartRef.current = 0
+    rangeEndRef.current = null
     setActiveKey(null)
     setPlayingKey(null)
+    notify(0)
     setPosition(0)
     setDuration(null)
     return () => {
@@ -126,6 +191,11 @@ export function useRangePlayer(sessionId: string): RangePlayer {
     playingKey,
     position,
     duration,
+    getPosition: () => positionRef.current,
+    subscribePosition: (cb) => {
+      subscribersRef.current.add(cb)
+      return () => { subscribersRef.current.delete(cb) }
+    },
     toggle(key, start, end) {
       const el = ref.current
       if (!el) return
@@ -146,9 +216,12 @@ export function useRangePlayer(sessionId: string): RangePlayer {
       el.pause()
       el.currentTime = Math.max(0, start)
       stopAt.current = end
+      rangeStartRef.current = start
+      rangeEndRef.current = end
       keyRef.current = key
       finishedRef.current = false
       setActiveKey(key)
+      notify(el.currentTime)
       setPosition(el.currentTime)
       void el.play()
     },
@@ -163,9 +236,12 @@ export function useRangePlayer(sessionId: string): RangePlayer {
       const bound = end ?? Infinity
       el.currentTime = Math.min(Math.max(start, start + Math.max(0, offsetS)), bound)
       stopAt.current = end
+      rangeStartRef.current = start
+      rangeEndRef.current = end
       keyRef.current = key
       finishedRef.current = false
       setActiveKey(key)
+      notify(el.currentTime)
       setPosition(el.currentTime)
     },
     playFrom(key, start, end, offsetS) {
@@ -175,11 +251,36 @@ export function useRangePlayer(sessionId: string): RangePlayer {
       const bound = end ?? Infinity
       el.currentTime = Math.min(Math.max(start, start + Math.max(0, offsetS)), bound)
       stopAt.current = end
+      rangeStartRef.current = start
+      rangeEndRef.current = end
       keyRef.current = key
       finishedRef.current = false
       setActiveKey(key)
+      notify(el.currentTime)
       setPosition(el.currentTime)
       if (el.paused) void el.play()
+    },
+    togglePlayPause() {
+      const el = ref.current
+      if (!el || keyRef.current == null) return
+      if (!el.paused) {
+        el.pause()
+        return
+      }
+      if (!finishedRef.current) {
+        void el.play()
+        return
+      }
+      // Already finished: restart from the active range's own start, and
+      // restore its own end as the new stop point (see rangeStartRef/
+      // rangeEndRef's doc comment for why `stopAt` alone can't be trusted
+      // here — onTime already cleared it to null when the range finished).
+      el.currentTime = Math.max(0, rangeStartRef.current)
+      stopAt.current = rangeEndRef.current
+      finishedRef.current = false
+      notify(el.currentTime)
+      setPosition(el.currentTime)
+      void el.play()
     },
     stop() {
       ref.current?.pause()

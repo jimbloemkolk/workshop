@@ -8,6 +8,11 @@ const APPEAR_AFTER_PX = 400
 /** Back to the top of the session. Bottom-left on purpose: the right margin
  * of the review screen is where the braces run and where the snippet cards
  * sit, and the left gutter is the one part of the page with nothing in it.
+ * Shares its visual vocabulary and its `left` position (see `.fab` and the
+ * --fab-* custom properties in styles.css) with PlayPauseFab, the
+ * play/pause control that sits beside it — that one's rendered from
+ * ReviewView instead of here, since that's where the player lives, but the
+ * two are positioned as a single pair.
  *
  * No label — the arrow is the whole message — but it still carries an
  * accessible name, since a button with no text is nameless to a screen
@@ -39,7 +44,7 @@ export function ToTopButton() {
   // out of the tab order and off the pointer.
   return (
     <button
-      className={`to-top${shown ? '' : ' away'}`}
+      className={`fab to-top${shown ? '' : ' away'}`}
       type="button"
       aria-label="Back to top"
       title="Back to top"

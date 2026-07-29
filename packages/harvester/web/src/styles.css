@@ -305,6 +305,130 @@ blockquote {
   background: var(--accent-wash);
 }
 .word.now-word { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+/* timeline ↔ linear mode switch, plus the zoom control (timeline-only —
+   hidden, not disabled, in linear mode: it has no scale to control there).
+   `linear` is Jim's original single-column layout (.segment/.speaker-tag
+   below), reused as-is — there is no linear-mode-specific CSS here because
+   there is no linear-mode-specific markup. Only ever rendered for a
+   two-speaker session; everything else has no choice to make and shows
+   neither. */
+.mode-toggle {
+  display: flex; align-items: center; gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+.mode-toggle button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.zoom-control { display: flex; align-items: center; gap: 0.3rem; margin-left: 0.6rem; }
+.zoom-control button { padding: 0.2rem 0.55rem; }
+.zoom-control input[type='range'] { width: 6rem; accent-color: var(--accent); }
+/* The timeline view (see createTimeScale/deriveCollapsedGaps/
+   resolveBlockOverlaps in ReviewView.tsx): the vertical axis IS elapsed
+   recording time, not reading order — a left ruler plus two speaker
+   columns sharing one absolute coordinate space, so a lull actually reads
+   as a lull instead of collapsing to zero width the way plain document
+   flow would. */
+.timeline-wrap {
+  display: grid;
+  grid-template-columns: 3rem 1fr;
+  column-gap: 0.6rem;
+  align-items: start;
+}
+/* Positioned relative so its ticks (position: absolute, top: scale.toY(...))
+   share the exact same coordinate space as the blocks in .timeline-track —
+   the whole point of a shared TimeScale is that a tick and the block beside
+   it, placed from the same `t`, land on the same pixel row. */
+.timeline-gutter {
+  position: relative;
+  cursor: pointer;
+  border-right: 1px solid var(--rule);
+}
+.timeline-tick {
+  position: absolute;
+  right: 0.5rem;
+  transform: translateY(-50%);
+  font-size: 0.6rem; color: var(--muted);
+  white-space: nowrap;
+  user-select: none;
+}
+.timeline-tick.minor { opacity: 0.6; font-size: 0.55rem; }
+/* Honesty cue for a block the collision pass pushed off its true time (see
+   resolveBlockOverlaps/displacementMarks in ReviewView.tsx): a short ochre
+   dash at the block's REAL position on the axis, not on the block itself —
+   understated on purpose, and the gutter (where the axis actually lives)
+   is the right place to admit the axis is bending for this one moment,
+   rather than decorating the text with it. */
+.timeline-displacement-mark {
+  position: absolute;
+  right: 0;
+  width: 0.45rem; height: 2px;
+  background: var(--warn);
+}
+.timeline-columns { min-width: 0; }
+.timeline-header-row { display: flex; gap: 1.5rem; }
+/* Column headers replace the per-segment .speaker-tag cell in this mode
+   (every block in a column is already that speaker's — repeating the name
+   on each one would be noise). Sticky within the page's own scroll, same
+   idea as .snippets. */
+.timeline-header-row > .timeline-header {
+  flex: 1; min-width: 0;
+  position: sticky; top: 0;
+  background: var(--paper);
+  padding: 0.1rem 0 0.5rem;
+  margin-bottom: 0.3rem;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.65rem; color: var(--muted);
+}
+/* The absolute-positioning root: every block's `top` (from the TimeScale,
+   then possibly pushed down by resolveBlockOverlaps) and the playhead's
+   `translateY` are both relative to this element's own top edge. */
+.timeline-track { position: relative; }
+/* Same geometry-constancy rule as .segment (Jim's linear layout, above):
+   padding and the inset box-shadow live permanently on the base rule,
+   transparent by default, so toggling .now-playing only ever repaints
+   colors — critically so here, since a height change would be exactly the
+   kind of feedback the measure/adjust pass's doc comment promises can't
+   happen. Width is a percentage of the track (two columns, a gap between),
+   not a grid — timeline mode positions purely by pixel `top`, so there are
+   no grid rows to place a block into. */
+.timeline-block {
+  position: absolute;
+  width: calc(50% - 0.75rem);
+  padding: 0.1rem 0.6rem;
+  border-radius: 2px;
+  box-shadow: inset 3px 0 0 transparent;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+.timeline-block[data-col='0'] { left: 0; }
+.timeline-block[data-col='1'] { left: calc(50% + 0.75rem); }
+/* The rare segment whose speaker matches neither column (see OTHER_COLUMN
+   in ReviewView.tsx) — spans the full width instead of guessing a side. */
+.timeline-block-wide { left: 0; width: 100%; }
+.timeline-block.now-playing {
+  box-shadow: inset 3px 0 0 var(--accent);
+  background: var(--accent-wash);
+}
+/* A collapsed silence: a fixed-height band spanning both columns, labelled
+   with how long it really ran — the one place in this view where the
+   ruler's honesty (real duration) and the layout's compression (fixed
+   pixels) are both visible at once. */
+.timeline-gap {
+  position: absolute;
+  left: 0; right: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.65rem; font-style: italic; color: var(--muted);
+  background: var(--surface);
+  border-top: 1px dashed var(--rule); border-bottom: 1px dashed var(--rule);
+}
+/* One element, moved via transform rather than by ever re-laying-out the
+   pane — playheadS updates every rAF tick during playback, and a `top`
+   change there would mean a style recalculation on every frame instead of
+   a compositor-only transform. */
+.timeline-playhead {
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 0;
+  border-top: 2px solid var(--accent);
+  box-shadow: 0 0 6px 0 var(--accent-glow);
+  pointer-events: none;
+}
 /* Floating "create snippet from selection" affordance — position: fixed
    (not absolute) deliberately: the transcript pane scrolls internally, and
    fixed viewport coordinates from the Selection Range's own
@@ -407,32 +531,49 @@ blockquote {
   background: var(--surface); border: 1px solid var(--accent); border-radius: 3px;
   padding: 0.5rem 0.8rem; font-size: 0.85rem;
 }
-/* Back to the top of the session. Bottom-left because that gutter is the
-   one empty part of the page — the right margin carries the braces and the
-   cards. A hairline circle in the app's own button vocabulary rather than a
-   filled floating-action blob, and it only turns sienna (the accent that
-   means "you can act here") under the pointer. Fixed, so it rides the page
-   scroll it acts on. */
-.to-top {
-  position: fixed; left: 1.4rem; bottom: 1.4rem; z-index: 20;
-  width: 2.7rem; height: 2.7rem; padding: 0;
+/* Bottom-left floating buttons: ToTopButton (App.tsx) and the play/pause
+   FAB beside it (ReviewView.tsx, PlayPauseFab.tsx — the player lives in
+   ReviewView, so that's where it renders from, even though visually it's
+   this button's other half). Two independent components, one shared
+   geometry: --fab-size/--fab-bottom/--fab-left/--fab-gap are the ONLY
+   numbers either button's position is built from, so the pair can't drift
+   apart the way two hand-tuned `left`s eventually would. The second
+   button's `left` is derived from the first's plus its own width and the
+   gap — move any one of these four and both buttons move together. */
+:root {
+  --fab-size: 2.7rem;
+  --fab-bottom: 1.4rem;
+  --fab-left: 1.4rem;
+  --fab-gap: 0.7rem;
+}
+/* Shared visual vocabulary for both buttons: a hairline circle rather than
+   a filled floating-action blob, sienna (the accent that means "you can
+   act here") only under the pointer, and the same fade-down-and-away when
+   there's nothing to do. `.to-top`/`.play-pause-fab` below carry ONLY the
+   one thing that differs between them — `left`. */
+.fab {
+  position: fixed; bottom: var(--fab-bottom); z-index: 20;
+  width: var(--fab-size); height: var(--fab-size); padding: 0;
   display: grid; place-items: center;
   border: 1px solid var(--rule); border-radius: 50%;
   background: var(--surface); color: var(--muted);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  font-size: 1.1rem; line-height: 1;
   transition: color 0.15s ease, border-color 0.15s ease,
               opacity 0.25s ease, transform 0.25s ease;
 }
-.to-top svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.to-top:hover { color: var(--accent); border-color: var(--accent); background: var(--surface); }
-.to-top:focus-visible { outline: 2px solid var(--quote); outline-offset: 2px; }
-/* Near the top there's nothing to go back from: it fades down and out of
+.fab svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.fab:hover { color: var(--accent); border-color: var(--accent); background: var(--surface); }
+.fab:focus-visible { outline: 2px solid var(--quote); outline-offset: 2px; }
+/* Nothing to do (not scrolled down / nothing loaded): fades down and out of
    reach of both the pointer and the tab order. */
-.to-top.away { opacity: 0; transform: translateY(0.5rem); pointer-events: none; }
+.fab.away { opacity: 0; transform: translateY(0.5rem); pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
-  .to-top { transition: color 0.15s ease, border-color 0.15s ease; }
-  .to-top.away { transform: none; }
+  .fab { transition: color 0.15s ease, border-color 0.15s ease; }
+  .fab.away { transform: none; }
 }
+.to-top { left: var(--fab-left); }
+.play-pause-fab { left: calc(var(--fab-left) + var(--fab-size) + var(--fab-gap)); }
 
 /* Stacked: there's no margin left of which to speak, so the cards stop
    sticking (they'd cover the transcript) and the brace stops being drawn —
